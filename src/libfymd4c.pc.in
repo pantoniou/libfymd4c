@@ -1,0 +1,11 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+libdir=@PKGCONFIG_LIBDIR@
+includedir=@PKGCONFIG_INCLUDEDIR@
+
+Name: libfymd4c
+Description: Progressive, healing, syntax-aware Markdown to ANSI terminal renderer.
+Version: @PROJECT_VERSION@
+URL: @PROJECT_HOMEPAGE_URL@
+Requires: libfyaml
+Libs: -L${libdir} -lfymd4c
+Cflags: -I${includedir}

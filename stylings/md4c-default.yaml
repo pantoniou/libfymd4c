@@ -1,0 +1,75 @@
+# md4c ANSI renderer styling.
+#
+# Mirrors the libfyts model: named "styles" hold the raw ANSI/SGR sequences
+# (the only place escapes live), and "elements" reference them by name for their
+# "on"/"off" sequences. An element may carry a "light:" override chosen when the
+# background is light (see "background" below). YAML escapes \e (ESC) and \uXXXX
+# are honoured. An on/off value that is not a known style name is used verbatim,
+# so an inline "\e[..." still works.
+
+# Named styles: the vocabulary of raw escape sequences.
+styles:
+  none:           ""
+  reset:          "\e[0m"
+  bold:           "\e[1m"
+  bold-off:       "\e[22m"
+  italic:         "\e[3m"
+  italic-off:     "\e[23m"
+  underline:      "\e[4m"
+  underline-off:  "\e[24m"
+  strike:         "\e[9m"
+  strike-off:     "\e[29m"
+  dim:            "\e[2m"
+  dim-off:        "\e[22m"
+  black:          "\e[30m"
+  red:            "\e[31m"
+  green:          "\e[32m"
+  yellow:         "\e[33m"
+  blue:           "\e[34m"
+  magenta:        "\e[35m"
+  cyan:           "\e[36m"
+  default-fg:     "\e[39m"
+  bright-black:   "\e[90m"
+  heading:        "\e[1;35m"   # bold magenta
+  link:           "\e[4;34m"   # underline blue
+  link-url:       "\e[2;34m"   # dim blue
+
+# Elements: each picks an "on"/"off" style by name. "light:" overrides on/off on
+# a light background.
+elements:
+  heading:       { on: heading,   off: reset }
+  strong:        { on: bold,      off: bold-off }
+  emphasis:      { on: italic,    off: italic-off }
+  underline:     { on: underline, off: underline-off }
+  strikethrough: { on: strike,    off: strike-off }
+  code:          { on: cyan,      off: default-fg, light: { on: blue,   off: default-fg } }
+  math:          { on: yellow,    off: default-fg }
+  link:          { on: link,      off: reset }
+  link_url:      { on: link-url,  off: reset }
+  wikilink:      { on: link,      off: reset }
+  blockquote:    { on: dim,       off: dim-off }
+  code_block:    { on: dim,       off: dim-off }
+  rule:          { on: dim,       off: dim-off }
+  table_header:  { on: bold,      off: bold-off }
+  list_marker:   { on: dim,       off: dim-off }
+  task_done:     { on: green,     off: default-fg, light: { on: black,  off: default-fg } }
+
+# Glyphs.
+glyphs:
+  blockquote_bar:    "│"
+  list_bullet:       "*"
+  table_vertical:    "│"
+  table_horizontal:  "─"
+  table_cross:       "┼"
+
+# Background selecting the light/dark element variant: dark | light | auto.
+# auto consults $COLORFGBG (else assumes dark).
+background: auto
+
+# Fenced code-block syntax highlighting (libfyts). The language catalogue is a
+# build-time choice (MD4C_FYTS_CATALOGUE); these are the runtime knobs.
+code:
+  enabled:    true
+  theme:      default    # libfyts embedded "default", or a path to a styling YAML
+  background: auto        # auto | dark | light (auto follows the document background)
+  reverse:    false       # fyts "reverse" bubble mode (colour as background)

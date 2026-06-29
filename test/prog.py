@@ -11,12 +11,13 @@ def pipe_through_prog(argv, text):
     return [p1.returncode, result.decode('utf-8'), err]
 
 class Prog:
-    def __init__(self, cmdline="md2html", default_options=[]):
+    def __init__(self, cmdline="fymd4c -t html", default_options=[]):
         self.cmdline = cmdline.split()
-        if len(self.cmdline) <= 1:
-            # cmdline provided no command line options. Use default ones.
-            if isinstance(default_options, str):
-                self.cmdline += default_options.split()
-            else:
-                self.cmdline += default_options
+        # The per-test dialect options are additive requirements (e.g. --ftables),
+        # so always append them. The base cmdline may carry a fixed prefix such as
+        # "fymd4c -t html" (formerly a single md2html token).
+        if isinstance(default_options, str):
+            self.cmdline += default_options.split()
+        else:
+            self.cmdline += default_options
         self.to_html = lambda x: pipe_through_prog(self.cmdline, x)

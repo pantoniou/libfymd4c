@@ -2,6 +2,35 @@
 # MD4C Change Log
 
 
+## Fork additions (ANSI renderer / libfymd4c)
+
+  * Add **`libfymd4c`**, the one public opaque-typed library (libfyaml-style API).
+    The md4c parser, entity table, HTML renderer, heal utility, ANSI renderer,
+    YAML styling and streaming front-end are all compiled into it and hidden; it
+    exports only the `fymd_*` API. The renderer lives behind a single
+    `struct fymd_renderer` (one handle drives both one-shot rendering and
+    progressive, self-healing streaming, with syntax-highlighted fenced code via
+    tree-sitter/libfyts); stateless HTML and heal conversions are plain
+    `fymd_render_html*` / `fymd_heal*` functions (`libfymd4c-convert.h`). There
+    are **no standalone `libmd4c` / `libmd4c-html` / `libmd4c-heal` libraries** —
+    a single self-contained shared object whose only runtime dependency is
+    libfyaml. Ships soname, pkg-config and a CMake package
+    (`libfymd4c::libfymd4c`). Both shared and static builds are supported. See
+    [`docs/renderers.md`](docs/renderers.md).
+
+  * libfymd4c: the renderer config (`struct fymd_renderer_cfg`) can take the
+    styling as a pre-parsed libfyaml `fy_generic` (`style_generic`), making
+    libfyaml an explicit public dependency. Precedence: `style_generic` >
+    `style_path` > `style` > built-in default.
+
+  * Replace the two CLIs (`md2ansi`, `md2html`) with a single **`fymd4c`** tool
+    that links only `libfymd4c` and handles all formats: `-t ansi` (default),
+    `-t html` (with the Markdown dialect / `-f` full-html / `-x` xhtml flags) and
+    `-t heal`. Options are parsed with standard `getopt_long` (the bundled
+    `cmdline.[ch]` parser is gone). `entity.c` is compiled exactly once, inside
+    `libfymd4c`.
+
+
 ## Next Version (Work in Progress)
 
 New Features:

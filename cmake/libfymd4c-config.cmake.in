@@ -1,0 +1,29 @@
+@PACKAGE_INIT@
+
+# libfymd4c CMake package configuration file.
+
+set(libfymd4c_VERSION "@PROJECT_VERSION@")
+
+include(CMakeFindDependencyMacro)
+
+# The public header includes <libfyaml/libfyaml-generic.h>, and both the shared
+# and static libraries depend on libfyaml.
+find_dependency(libfyaml)
+
+# The static archive (libfymd4c::libfymd4c_static) does not absorb libfyts, so
+# when it was built against an installed libfyts it declares that dependency.
+if(@FYMD4C_STATIC_NEEDS_FYTS@)
+    find_dependency(libfyts)
+endif()
+
+include(${CMAKE_CURRENT_LIST_DIR}/libfymd4c-targets.cmake)
+
+# Consistent naming: libfymd4c::libfymd4c (shared) and ::libfymd4c_static.
+if(NOT TARGET libfymd4c::libfymd4c AND TARGET libfymd4c::fymd4c)
+    add_library(libfymd4c::libfymd4c ALIAS libfymd4c::fymd4c)
+endif()
+if(NOT TARGET libfymd4c::libfymd4c_static AND TARGET libfymd4c::fymd4c_static)
+    add_library(libfymd4c::libfymd4c_static ALIAS libfymd4c::fymd4c_static)
+endif()
+
+check_required_components(libfymd4c)

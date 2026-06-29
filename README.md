@@ -7,6 +7,17 @@
 
 MD4C stands for "Markdown for C" and that's exactly what this project is about.
 
+> **Fork note:** this fork adds, on top of the unmodified md4c parser, an ANSI
+> terminal renderer, a Markdown heal utility and a streaming front-end. These are
+> all compiled into **`libfymd4c`**, a single public, opaque-typed library
+> (libfyaml-style API: one `struct fymd_renderer` for both one-shot and
+> progressive, self-healing, syntax-aware rendering, plus stateless HTML/heal
+> conversions) — the recommended entry point for consumers, whose only runtime
+> dependency is libfyaml. A single CLI, **`fymd4c`**, drives all formats
+> (`-t ansi` default, `-t html`, `-t heal`). See
+> [`docs/renderers.md`](docs/renderers.md). Build with CMake; run our test with
+> `ctest` (target `stream`).
+
 
 ## What is Markdown
 
