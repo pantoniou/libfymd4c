@@ -1589,11 +1589,16 @@ emit_highlighted_code(MD_ANSI* r)
         case MD_STYLE_BG_LIGHT: cfg.background_mode = FYTS_BACKGROUND_LIGHT; break;
         default:                cfg.background_mode = FYTS_BACKGROUND_AUTO;  break;
     }
-    /* "default" (or empty) uses fyts's embedded theme; any other value is a
-     * path to a styling YAML file. */
-    if(r->style->code_theme != NULL && r->style->code_theme[0] != '\0'
-       && strcmp(r->style->code_theme, "default") != 0)
-        cfg.styling_path = r->style->code_theme;
+    /* code.theme selects the fyts styling: a value containing '/' is a path to
+     * a styling YAML file; any other non-empty value is the name of a libfyts
+     * built-in styling (including "default"). Empty/NULL leaves fyts on its
+     * embedded default. */
+    if(r->style->code_theme != NULL && r->style->code_theme[0] != '\0') {
+        if(strchr(r->style->code_theme, '/') != NULL)
+            cfg.styling_path = r->style->code_theme;
+        else
+            cfg.styling_name = r->style->code_theme;
+    }
     cfg.reverse = reverse;
     cfg.line_prefix = prefix;
     /* fyts clips each line to `width`, subtracting the line_prefix width itself;
