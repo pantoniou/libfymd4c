@@ -28,6 +28,16 @@ FIXTURES = {
     "cjk_emoji": "| Lang | Word |\n|------|------|\n| cjk | 日本語 |\n| emoji | \U0001f680\U0001f525 |\n\nend.\n",
     "nested": "1. outer\n   - inner a\n   - inner b\n\n2. second\n",
     "mixed": "# Doc\n\nIntro paragraph.\n\n| x | y |\n|---|---|\n| 1 | 2 |\n\n> note\n\n- a\n- b\n\nThe end.\n",
+    # Multi-line HTML blocks (CommonMark types 1-5) may contain blank lines and
+    # only close on their end marker (</pre>, -->, ?>, >, ]]>), not on a blank
+    # line. A blank line inside them must NOT be taken as a stream sync point, or
+    # the block gets split and its Markdown-looking tail (e.g. *not em*) is
+    # re-parsed as emphasis, diverging from the one-shot render.
+    "html_comment": "Before\n\n<!-- a comment\n\nstill *not em*\n-->\n\nAfter\n",
+    "html_pre": "Before\n\n<pre>\nline one\n\n*not em*\n</pre>\n\nAfter\n",
+    "html_script": "A\n\n<script>\nvar x=1;\n\n*not em*\n</script>\n\nB\n",
+    "html_cdata": "A\n\n<![CDATA[\nfoo\n\n*not em*\n]]>\n\nB\n",
+    "html_decl": "A\n\n<!SOMEDECL\n\n*not em*\n>\n\nB\n",
 }
 
 CHUNKS = [1, 2, 3, 7, 16, 64]

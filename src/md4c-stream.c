@@ -149,6 +149,77 @@ line_is_list_item(const char* s, size_t n)
     return (j > i && j < n && (s[j] == '.' || s[j] == ')'));
 }
 
+/* Case-insensitive test: do the first bytes of s equal the lowercase literal? */
+static int
+ci_prefix(const char* s, size_t slen, const char* lit)
+{
+    size_t i;
+    for(i = 0; lit[i] != '\0'; i++) {
+        char c;
+        if(i >= slen) return 0;
+        c = s[i];
+        if(c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if(c != lit[i]) return 0;
+    }
+    return 1;
+}
+
+/* Case-insensitive search for the lowercase literal `lit` anywhere in s. */
+static int
+ci_contains(const char* s, size_t slen, const char* lit)
+{
+    size_t litlen = strlen(lit), i;
+    if(slen < litlen) return 0;
+    for(i = 0; i + litlen <= slen; i++)
+        if(ci_prefix(s + i, slen - i, lit))
+            return 1;
+    return 0;
+}
+
+/* If a leading-whitespace-trimmed line begins an HTML block that may span blank
+ * lines (CommonMark HTML block types 1-5), return its end-condition code (1-5),
+ * else 0. Types 6-7 are deliberately excluded: a blank line legitimately closes
+ * them, so it stays a valid sync point. */
+static int
+html_block_start_type(const char* s, size_t m)
+{
+    static const char* const names[] = { "pre", "script", "style", "textarea" };
+    size_t j;
+    if(m < 2 || s[0] != '<') return 0;
+    if(m >= 4 && s[1] == '!' && s[2] == '-' && s[3] == '-') return 2;   /* <!--     */
+    if(ci_prefix(s, m, "<![cdata[")) return 5;                          /* <![CDATA[ */
+    if(s[1] == '?') return 3;                                           /* <?       */
+    if(m >= 3 && s[1] == '!'
+       && ((s[2] >= 'A' && s[2] <= 'Z') || (s[2] >= 'a' && s[2] <= 'z')))
+        return 4;                                                      /* <!LETTER */
+    for(j = 0; j < sizeof(names) / sizeof(names[0]); j++) {            /* type 1   */
+        size_t len = strlen(names[j]);
+        if(m - 1 >= len && ci_prefix(s + 1, m - 1, names[j])) {
+            char c = (m - 1 > len) ? s[1 + len] : '\0';
+            if(c == '\0' || c == ' ' || c == '\t' || c == '>')
+                return 1;
+        }
+    }
+    return 0;
+}
+
+/* Does this line satisfy the end condition of an open type-`type` HTML block? */
+static int
+html_block_ends(const char* line, size_t llen, int type)
+{
+    switch(type) {
+        case 1: return ci_contains(line, llen, "</pre>")
+                    || ci_contains(line, llen, "</script>")
+                    || ci_contains(line, llen, "</style>")
+                    || ci_contains(line, llen, "</textarea>");
+        case 2: return ci_contains(line, llen, "-->");
+        case 3: return ci_contains(line, llen, "?>");
+        case 4: return ci_contains(line, llen, ">");
+        case 5: return ci_contains(line, llen, "]]>");
+    }
+    return 0;
+}
+
 /* Furthest "safe sync point" offset greater than `from`: the offset just after
  * a blank line that (a) is not inside a fenced code block, and (b) is followed
  * by a complete next line that starts at column 0, is non-blank and is not a
@@ -161,6 +232,7 @@ next_sync_offset(const char* data, size_t size, size_t from)
     size_t i = 0, line_start = 0, best = from;
     int in_fence = 0;
     char fence_ch = 0;
+    int in_html = 0, html_type = 0;
 
     while(i <= size) {
         if(i == size || data[i] == '\n') {
@@ -175,24 +247,34 @@ next_sync_offset(const char* data, size_t size, size_t from)
 
             if(in_fence) {
                 if(is_fence && line[k] == fence_ch) in_fence = 0;
+            } else if(in_html) {
+                /* A blank line inside a type 1-5 HTML block does not close it,
+                 * so it is not a sync point; wait for the block's end marker. */
+                if(html_block_ends(line, llen, html_type)) in_html = 0;
             } else if(is_fence) {
                 in_fence = 1;
                 fence_ch = line[k];
-            } else if(i < size) {
-                /* Blank line (only spaces/tabs/CR)? */
-                int blank = 1;
-                size_t b = line_start;
-                while(b < i) {
-                    char c = data[b];
-                    if(c != ' ' && c != '\t' && c != '\r') { blank = 0; break; }
-                    b++;
-                }
-                if(blank) {
-                    size_t nxt = i + 1;
-                    if(nxt < size && data[nxt] != ' ' && data[nxt] != '\t' && data[nxt] != '\n') {
-                        const char* nl = (const char*) memchr(data + nxt, '\n', size - nxt);
-                        if(nl != NULL && !line_is_list_item(data + nxt, (size_t)(nl - (data + nxt))))
-                            best = nxt;   /* keep the furthest qualifying point */
+            } else {
+                int t = html_block_start_type(line + k, llen - k);
+                if(t) {
+                    /* Enter the block unless it also ends on this same line. */
+                    if(!html_block_ends(line, llen, t)) { in_html = 1; html_type = t; }
+                } else if(i < size) {
+                    /* Blank line (only spaces/tabs/CR)? */
+                    int blank = 1;
+                    size_t b = line_start;
+                    while(b < i) {
+                        char c = data[b];
+                        if(c != ' ' && c != '\t' && c != '\r') { blank = 0; break; }
+                        b++;
+                    }
+                    if(blank) {
+                        size_t nxt = i + 1;
+                        if(nxt < size && data[nxt] != ' ' && data[nxt] != '\t' && data[nxt] != '\n') {
+                            const char* nl = (const char*) memchr(data + nxt, '\n', size - nxt);
+                            if(nl != NULL && !line_is_list_item(data + nxt, (size_t)(nl - (data + nxt))))
+                                best = nxt;   /* keep the furthest qualifying point */
+                        }
                     }
                 }
             }
