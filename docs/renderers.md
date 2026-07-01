@@ -74,7 +74,7 @@ fymd_renderer_destroy(r);
 | `FYMD_RF_SHOW_URLS`    | Show link targets inline                          |
 | `FYMD_RF_TABLE_FIT`    | Size tables to content instead of filling width   |
 | `FYMD_RF_HEAL`         | Close dangling markers in the active/in-progress tail |
-| `FYMD_RF_CODE_REVERSE` | Reverse ("bubble") syntax highlighting of fenced code |
+| `FYMD_RF_REVERSE`      | Render the whole document as a card (theme background filled to width) |
 | `FYMD_RF_NO_CODE_HL`   | Disable fenced-code syntax highlighting           |
 
 `FYMD_RF_DEFAULT` is `FYMD_RF_HEAL`. `fymd_renderer_get_cfg()` returns the

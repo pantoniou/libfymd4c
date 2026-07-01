@@ -47,6 +47,7 @@ typedef struct MD_ANSI_STYLE {
     MD_STYLE_PAIR table_header;
     MD_STYLE_PAIR list_marker;   /* list bullets / ordered numbers */
     MD_STYLE_PAIR task_done;     /* checked task-list marker */
+    MD_STYLE_PAIR reverse;       /* whole-document card background (.on = bg set) */
 
     const char* blockquote_bar;
     const char* list_bullet;

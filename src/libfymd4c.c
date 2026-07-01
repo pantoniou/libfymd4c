@@ -120,7 +120,7 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     /* Build the styling context once. */
     memset(&sopts, 0, sizeof(sopts));
     sopts.background = map_background(cfg->background);
-    sopts.reverse = (cfg->flags & FYMD_RF_CODE_REVERSE) ? 1 : -1;
+    sopts.reverse = -1;   /* the fenced-code bubble is YAML-driven (code.reverse) */
 
     if(fy_generic_is_valid(cfg->style_generic) && cfg->style_generic.v != 0)
         r->style = md_ansi_style_create_from_generic(cfg->style_generic, &sopts);
@@ -154,6 +154,7 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     if(cfg->flags & FYMD_RF_SHOW_URLS) rf |= MD_ANSI_FLAG_SHOW_URLS;
     if(cfg->flags & FYMD_RF_TABLE_FIT) rf |= MD_ANSI_FLAG_TABLE_FIT_CONTENT;
     if(cfg->flags & FYMD_RF_HEAL)      rf |= MD_ANSI_FLAG_HEAL;
+    if(cfg->flags & FYMD_RF_REVERSE)   rf |= MD_ANSI_FLAG_REVERSE;
     if(cfg->sgr_input == FYMD_SGR_KEEP) rf |= MD_ANSI_FLAG_SGR_KEEP;
     else if(cfg->sgr_input == FYMD_SGR_SAFE) rf |= MD_ANSI_FLAG_SGR_SAFE;
     r->renderer_flags = rf;

@@ -181,6 +181,14 @@ struct MD_ANSI_tag {
 
     char* sgr_buf;          /* scratch for filtering escapes out of input text */
     MD_SIZE sgr_cap;
+
+    /* Whole-document "card" mode (MD_ANSI_FLAG_REVERSE): each output line is
+     * given the theme background and padded to the full width. Output is
+     * buffered a line at a time and transformed before reaching the real sink. */
+    int card;                       /* card mode active (bg from style->reverse.on) */
+    void (*real_output)(const MD_CHAR*, MD_SIZE, void*); /* sink when not capturing */
+    char* card_buf;                 /* current line being accumulated */
+    MD_SIZE card_size, card_cap;
 };
 
 
@@ -225,12 +233,101 @@ typedef struct {
 
 static void sgr_scan(SGR_STATE* s, const char* buf, MD_SIZE size);
 static size_t sgr_build(const SGR_STATE* s, char* out, size_t cap);
+static MD_SIZE ansi_esc_len(const char* s, MD_SIZE n);
+
+/* True if an "ESC[...m" sequence (given its params, the bytes between "[" and
+ * "m") is a full reset (empty, or all zeros) -- the kind that clears the card
+ * background and so needs it re-applied afterwards. */
+static int
+sgr_is_reset(const char* params, MD_SIZE n)
+{
+    MD_SIZE i;
+    for(i = 0; i < n; i++)
+        if(params[i] != '0' && params[i] != ';')
+            return 0;
+    return 1;
+}
+
+/* Emit one completed output line (r->card_buf, no trailing newline) as a card:
+ * the theme background, the content with the background re-applied after every
+ * full reset, then erase-to-end-of-line (which fills the background to the edge)
+ * and a reset. Called only when card mode is active and not mid-capture. */
+static void
+flush_card_line(MD_ANSI* r)
+{
+    const char* b = r->card_buf;
+    const char* bg = r->style->reverse.on;      /* card background (from YAML) */
+    const char* off = r->style->reverse.off;    /* reset (from YAML) */
+    MD_SIZE bglen = (MD_SIZE) strlen(bg);
+    MD_SIZE n = r->card_size, i = 0;
+
+    r->real_output(bg, bglen, r->userdata);
+    while(i < n) {
+        MD_SIZE e = ansi_esc_len(b + i, n - i);
+        if(e > 0) {
+            r->real_output(b + i, e, r->userdata);
+            /* A full reset in the content clears the card background; put it back. */
+            if(e >= 3 && (unsigned char) b[i] == 0x1b && b[i + 1] == '['
+               && b[i + e - 1] == 'm' && sgr_is_reset(b + i + 2, e - 3))
+                r->real_output(bg, bglen, r->userdata);
+            i += e;
+        } else {
+            MD_SIZE j = i;
+            while(j < n && (unsigned char) b[j] != 0x1b) j++;
+            r->real_output(b + i, j - i, r->userdata);
+            i = j;
+        }
+    }
+    r->real_output(bg, bglen, r->userdata);          /* bg active for the fill */
+    r->real_output("\x1b[K", 3, r->userdata);        /* erase to EOL (structural) */
+    r->real_output(off, (MD_SIZE) strlen(off), r->userdata);
+    r->real_output("\n", 1, r->userdata);
+    r->card_size = 0;
+}
+
+/* Append `n` bytes to the current card line buffer, growing it as needed. */
+static void
+card_append(MD_ANSI* r, const MD_CHAR* text, MD_SIZE n)
+{
+    if(n == 0)
+        return;
+    if(r->card_size + n > r->card_cap) {
+        MD_SIZE nc = r->card_cap ? r->card_cap : 256;
+        char* p;
+        while(nc < r->card_size + n) nc *= 2;
+        p = (char*) realloc(r->card_buf, nc);
+        if(p == NULL) return;
+        r->card_buf = p; r->card_cap = nc;
+    }
+    memcpy(r->card_buf + r->card_size, text, n);
+    r->card_size += n;
+}
+
+/* Accumulate output into the current line; emit each completed line as a card. */
+static void
+card_feed(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+{
+    MD_SIZE start = 0, i;
+    for(i = 0; i < size; i++) {
+        if(text[i] != '\n')
+            continue;
+        card_append(r, text + start, i - start);
+        flush_card_line(r);
+        start = i + 1;
+    }
+    card_append(r, text + start, size - start);
+}
 
 /* Write bytes straight to the output callback (bypassing the line buffer). */
 static void
 out_direct(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
-    r->process_output(text, size, r->userdata);
+    /* In card mode, route real output (but not internal captures, which swap
+     * process_output to a capture sink) through the per-line card transform. */
+    if(r->card && r->process_output == r->real_output)
+        card_feed(r, text, size);
+    else
+        r->process_output(text, size, r->userdata);
     if(size > 0)
         r->line_dirty = (text[size - 1] != '\n');
     if(r->flags & MD_ANSI_FLAG_CODE_META)
@@ -1456,7 +1553,9 @@ emit_highlighted_code(MD_ANSI* r)
     ANSI_CAPTURE_BUF cap = { prefix, 0, sizeof(prefix) - 1 };
     void (*saved_out)(const MD_CHAR*, MD_SIZE, void*);
     void* saved_ud;
-    int rc, reverse = r->style->code_reverse;
+    /* The fenced-code bubble is a special case: in whole-document card mode it
+     * is suppressed, so code is highlighted normally and sits on the card. */
+    int rc, reverse = r->style->code_reverse && !r->card;
     /* Clip width for fyts: 0 (no wrap / MD_ANSI_WIDTH_INF) means no clipping,
      * matching prose. fyts subtracts the line_prefix (indent + 2-space margin)
      * itself, so reserving DOC_MARGIN here lands the content inside the rule box.
@@ -1656,7 +1755,7 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             /* Header rule (with the language label, when present). In reverse
              * mode the header is deferred to leave, where it is drawn on fyts's
              * frame background together with the code. */
-            if(!(r->code_highlight && r->style->code_reverse))
+            if(!(r->code_highlight && r->style->code_reverse && !r->card))
                 render_code_rule(r, r->code_lang, r->code_lang_size);
 
             if(r->flags & MD_ANSI_FLAG_CODE_META) {
@@ -1802,7 +1901,7 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 if(done == 0) {
                     /* Fall back to plain. In reverse mode the header was deferred
                      * to here, so draw it (plain) before the body. */
-                    if(r->style->code_reverse)
+                    if(r->style->code_reverse && !r->card)
                         render_code_rule(r, r->code_lang, r->code_lang_size);
                     emit_plain_code(r);
                 }
@@ -2124,6 +2223,7 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
 
     memset(&render, 0, sizeof(render));
     render.process_output = process_output;
+    render.real_output = process_output;
     render.userdata = userdata;
     render.flags = renderer_flags;
     render.table_width = width;
@@ -2134,6 +2234,11 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
         style = owned_style;
     }
     render.style = style;
+    /* Whole-document card: fill every line with the theme background from the
+     * style (style->reverse.on), unless colour is disabled or no bg is set. */
+    if((renderer_flags & MD_ANSI_FLAG_REVERSE) && !(renderer_flags & MD_ANSI_FLAG_NO_COLOR)
+       && style->reverse.on != NULL && style->reverse.on[0] != '\0')
+        render.card = 1;
     /* Resolve the prose wrap width: fixed, auto-detected, or 0 (no wrap). */
     if(width == MD_ANSI_WIDTH_INF)
         render.wrap_cols = 0;
@@ -2163,9 +2268,13 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
         /* Flush any line still buffered by the wrapper. */
         if(render.line_open)
             flush_wrapped(&render);
+        /* Emit any trailing card line the output did not terminate with '\n'. */
+        if(render.card && render.card_size > 0)
+            flush_card_line(&render);
         free(render.lbuf);
         free(render.code_buf);
         free(render.sgr_buf);
+        free(render.card_buf);
 
         /* Free any table left dangling by an aborted parse. */
         if(render.table != NULL)

@@ -70,7 +70,8 @@ enum fymd_cfg_flags {
     FYMD_RF_SHOW_URLS    = FYMD_BIT(1), /* show link targets inline */
     FYMD_RF_TABLE_FIT    = FYMD_BIT(2), /* size tables to content, not to width */
     FYMD_RF_HEAL         = FYMD_BIT(3), /* close dangling markers in the active tail */
-    FYMD_RF_CODE_REVERSE = FYMD_BIT(4), /* reverse "bubble" fenced code blocks */
+    FYMD_RF_REVERSE      = FYMD_BIT(4), /* render the whole document as a card
+                                           (theme background filled to width) */
     FYMD_RF_NO_CODE_HL   = FYMD_BIT(5)  /* disable fenced-code syntax highlighting */
 };
 

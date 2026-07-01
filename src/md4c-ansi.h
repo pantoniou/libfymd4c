@@ -57,6 +57,9 @@ extern "C"
  * moves, screen clears, OSC, ...). KEEP takes precedence if both are set. */
 #define MD_ANSI_FLAG_SGR_KEEP 0x0200
 #define MD_ANSI_FLAG_SGR_SAFE 0x0400
+/* Render the whole document as a "card": every line is padded to the full width
+ * with the theme background (like the fenced-code bubble, but document-wide). */
+#define MD_ANSI_FLAG_REVERSE 0x0800
 
     /* Render Markdown into ANSI terminal output.
      *

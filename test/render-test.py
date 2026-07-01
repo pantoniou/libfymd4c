@@ -68,14 +68,37 @@ CASES = {
 }
 
 
-def run(program, text):
-    p = subprocess.run([program, "-t", "ansi", "--color=off", "--width=60"],
+def run(program, text, extra=None):
+    p = subprocess.run([program, "-t", "ansi", "--color=off", "--width=60"]
+                       + (extra or []),
                        input=text.encode("utf-8"),
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if p.returncode != 0:
         raise RuntimeError("fymd4c failed (%d): %s"
                            % (p.returncode, p.stderr.decode("utf-8", "replace")))
     return p.stdout.decode("utf-8")
+
+
+def check_reverse(program):
+    """Whole-document card (--reverse): every emitted line must be wrapped in
+    the theme background and padded to the edge with erase-to-end-of-line."""
+    text = "# Title\n\nSome text.\n\n- a\n- b\n"
+    out = subprocess.run(
+        [program, "-t", "ansi", "--color=on", "--reverse",
+         "--background=dark", "--width=30"],
+        input=text.encode("utf-8"),
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if out.returncode != 0:
+        raise RuntimeError("fymd4c --reverse failed")
+    lines = out.stdout.decode("utf-8").split("\n")[:-1]  # drop trailing ""
+    BG = "\x1b[40m"          # dark card background (from the style)
+    FILL = "\x1b[K\x1b[0m"   # erase-to-EOL + reset
+    ok = bool(lines) and all(l.startswith(BG) and l.endswith(FILL) for l in lines)
+    if not ok:
+        print("FAIL reverse_card")
+        for l in lines:
+            print("  %r" % l)
+    return ok
 
 
 def main():
@@ -94,6 +117,11 @@ def main():
             print("  input:    %r" % text)
             print("  expected: %r" % expected)
             print("  got:      %r" % got)
+
+    if check_reverse(opts.program):
+        passed += 1
+    else:
+        failed += 1
 
     print("%d passed, %d failed" % (passed, failed))
     sys.exit(1 if failed else 0)

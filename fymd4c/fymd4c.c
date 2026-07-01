@@ -441,7 +441,7 @@ usage(void)
         "      --style=FILE     YAML styling config (overrides the built-in default)\n"
         "      --background=MODE  Background for light/dark styles: auto (default), dark, light\n"
         "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
-        "      --reverse        Reverse (bubble) syntax highlighting of fenced code\n"
+        "      --reverse        Render the whole document as a card (background filled to width)\n"
         "      --stream         Render incrementally (push mode)\n"
         "      --stream-progressive  Live progressive render; updates the active region in place\n"
         "      --max-active-lines=N  Cap the streaming active region to N input lines (0 = unlimited)\n"
@@ -682,7 +682,7 @@ main(int argc, char** argv)
     if(!use_color)          cfg.flags |= FYMD_RF_NO_COLOR;
     if(table_fit_content)   cfg.flags |= FYMD_RF_TABLE_FIT;
     if(want_heal)           cfg.flags |= FYMD_RF_HEAL;
-    if(forced_reverse)      cfg.flags |= FYMD_RF_CODE_REVERSE;
+    if(forced_reverse)      cfg.flags |= FYMD_RF_REVERSE;
 
     r = fymd_renderer_create(&cfg);
     if(r == NULL) {
