@@ -200,6 +200,18 @@ static int ansi_disp_width(const char* buf, MD_SIZE size);
 static TLINE* wrap_text(const char* buf, MD_SIZE size, int width, int* n_out);
 static void render_indent(MD_ANSI* r);
 
+/* Running SGR (Select Graphic Rendition) state, so wrap continuation lines can
+ * close an active style before the newline and re-apply it afterwards (else an
+ * open underline/reverse/background bleeds across the break and the indent). */
+typedef struct {
+    int bold, faint, italic, underline, blink, reverse, conceal, strike, overline;
+    char fg[24];   /* SGR params for the foreground, e.g. "31" or "38;5;12"; "" = default */
+    char bg[24];   /* SGR params for the background; "" = default */
+} SGR_STATE;
+
+static void sgr_scan(SGR_STATE* s, const char* buf, MD_SIZE size);
+static size_t sgr_build(const SGR_STATE* s, char* out, size_t cap);
+
 /* Write bytes straight to the output callback (bypassing the line buffer). */
 static void
 out_direct(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
@@ -310,14 +322,28 @@ flush_wrapped(MD_ANSI* r)
     int avail = r->wrap_cols - r->indent_w - DOC_MARGIN;  /* reserve right margin */
     int n = 0, k;
     TLINE* lines;
+    SGR_STATE st;
+    MD_SIZE scanned = 0;
 
     if(avail < 1) avail = 1;
     lines = wrap_text(r->lbuf, r->lsize, avail, &n);
+    memset(&st, 0, sizeof(st));
 
     for(k = 0; k < n; k++) {
         if(k > 0) {
+            char active[128];
+            size_t alen;
+            /* Fold in everything up to this break so `st` reflects the style
+             * active at the wrap point. */
+            sgr_scan(&st, r->lbuf + scanned, lines[k].start - scanned);
+            scanned = lines[k].start;
+            alen = sgr_build(&st, active, sizeof(active));
+            if(alen > 0)
+                out_direct(r, "\x1b[0m", 4);        /* close before the newline */
             out_direct(r, "\n", 1);
             out_direct(r, r->indent_buf, r->indent_len);  /* replay prefix */
+            if(alen > 0)
+                out_direct(r, active, alen);        /* re-apply the open style */
         }
         if(lines[k].len > 0)
             out_direct(r, r->lbuf + lines[k].start, lines[k].len);
@@ -747,6 +773,117 @@ ansi_esc_len(const char* s, MD_SIZE n)
     if(n >= 2 && s[1] == '\\')             /* ST */
         return 2;
     return 1;
+}
+
+/* Apply one SGR sequence (the params between "ESC[" and the final 'm', already
+ * tokenised into vals[0..count)) to the running state. Returns nothing; the
+ * extended colour forms 38/48;5;n and 38/48;2;r;g;b consume trailing params. */
+static void
+sgr_apply(SGR_STATE* s, const int* vals, int count)
+{
+    int j;
+    for(j = 0; j < count; j++) {
+        int v = vals[j];
+        if(v == 0) { memset(s, 0, sizeof(*s)); continue; }
+        switch(v) {
+            case 1:  s->bold = 1; break;
+            case 2:  s->faint = 1; break;
+            case 22: s->bold = s->faint = 0; break;
+            case 3:  s->italic = 1; break;
+            case 23: s->italic = 0; break;
+            case 4:  s->underline = 1; break;
+            case 24: s->underline = 0; break;
+            case 5: case 6: s->blink = 1; break;
+            case 25: s->blink = 0; break;
+            case 7:  s->reverse = 1; break;
+            case 27: s->reverse = 0; break;
+            case 8:  s->conceal = 1; break;
+            case 28: s->conceal = 0; break;
+            case 9:  s->strike = 1; break;
+            case 29: s->strike = 0; break;
+            case 53: s->overline = 1; break;
+            case 55: s->overline = 0; break;
+            case 39: s->fg[0] = '\0'; break;
+            case 49: s->bg[0] = '\0'; break;
+            default:
+                if((v >= 30 && v <= 37) || (v >= 90 && v <= 97))
+                    snprintf(s->fg, sizeof(s->fg), "%d", v);
+                else if((v >= 40 && v <= 47) || (v >= 100 && v <= 107))
+                    snprintf(s->bg, sizeof(s->bg), "%d", v);
+                else if(v == 38 || v == 48) {
+                    char* dst = (v == 38) ? s->fg : s->bg;
+                    if(j + 1 < count && vals[j + 1] == 5 && j + 2 < count) {
+                        snprintf(dst, sizeof(s->fg), "%d;5;%d", v, vals[j + 2]);
+                        j += 2;
+                    } else if(j + 1 < count && vals[j + 1] == 2 && j + 4 < count) {
+                        snprintf(dst, sizeof(s->fg), "%d;2;%d;%d;%d", v,
+                                 vals[j + 2], vals[j + 3], vals[j + 4]);
+                        j += 4;
+                    }
+                }
+                break;
+        }
+    }
+}
+
+/* Walk a byte range, folding every SGR escape it contains into the state. */
+static void
+sgr_scan(SGR_STATE* s, const char* buf, MD_SIZE size)
+{
+    MD_SIZE i = 0;
+    while(i < size) {
+        MD_SIZE e = ansi_esc_len(buf + i, size - i);
+        if(e == 0) { i++; continue; }
+        /* Only SGR (CSI ... 'm') sequences affect style state. */
+        if(e >= 3 && (unsigned char) buf[i] == 0x1b && buf[i + 1] == '['
+           && buf[i + e - 1] == 'm') {
+            int vals[32], count = 0, cur = 0, have = 0;
+            MD_SIZE p;
+            for(p = i + 2; p < i + e - 1; p++) {
+                char c = buf[p];
+                if(c >= '0' && c <= '9') { cur = cur * 10 + (c - '0'); have = 1; }
+                else if(c == ';') {
+                    if(count < (int)(sizeof(vals)/sizeof(vals[0]))) vals[count++] = cur;
+                    cur = 0; have = 1;
+                }
+            }
+            if(have && count < (int)(sizeof(vals)/sizeof(vals[0]))) vals[count++] = cur;
+            if(count == 0) { memset(s, 0, sizeof(*s)); }  /* "ESC[m" == reset */
+            else sgr_apply(s, vals, count);
+        }
+        i += e;
+    }
+}
+
+/* Serialise the active state into a single "ESC[...m" sequence in out (NUL-
+ * terminated). Returns its byte length, or 0 when no style is active. */
+static size_t
+sgr_build(const SGR_STATE* s, char* out, size_t cap)
+{
+    char params[96];
+    size_t n = 0;
+    #define SGR_PUT(str)                                              \
+        do {                                                          \
+            size_t l = strlen(str);                                   \
+            if(n && n + 1 < sizeof(params)) params[n++] = ';';        \
+            if(n + l < sizeof(params)) { memcpy(params + n, (str), l); n += l; } \
+        } while(0)
+    if(s->bold)      SGR_PUT("1");
+    if(s->faint)     SGR_PUT("2");
+    if(s->italic)    SGR_PUT("3");
+    if(s->underline) SGR_PUT("4");
+    if(s->blink)     SGR_PUT("5");
+    if(s->reverse)   SGR_PUT("7");
+    if(s->conceal)   SGR_PUT("8");
+    if(s->strike)    SGR_PUT("9");
+    if(s->overline)  SGR_PUT("53");
+    if(s->fg[0])     SGR_PUT(s->fg);
+    if(s->bg[0])     SGR_PUT(s->bg);
+    #undef SGR_PUT
+    params[n] = '\0';
+    if(n == 0)
+        return 0;
+    return (size_t) snprintf(out, cap, "\x1b[%sm", params);
 }
 
 /* Display width of a buffer, ignoring ANSI escape sequences. */
