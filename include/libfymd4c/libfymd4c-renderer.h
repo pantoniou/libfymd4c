@@ -77,6 +77,16 @@ enum fymd_cfg_flags {
 /* Sensible default flags: heal the in-progress tail. */
 #define FYMD_RF_DEFAULT (FYMD_RF_HEAL)
 
+/* Policy for ANSI escape sequences embedded in the input text (as opposed to
+ * the SGR the renderer emits itself). Untrusted Markdown may smuggle escapes
+ * that move the cursor or clear the screen, so the default is to strip them. */
+enum fymd_sgr_input {
+    FYMD_SGR_STRIP = 0, /* default: remove input escape sequences entirely */
+    FYMD_SGR_KEEP,      /* pass input escape sequences through unchanged */
+    FYMD_SGR_SAFE       /* keep only SGR (colour/attribute) sequences; strip the
+                           rest (cursor moves, screen clears, OSC, ...) */
+};
+
 /* Layout width sentinels (match the columns argument otherwise). */
 #define FYMD_WIDTH_AUTO (-1) /* detect from $COLUMNS / terminal, else 80 */
 #define FYMD_WIDTH_INF  0    /* unlimited: size tables to content, no wrap */
@@ -96,6 +106,7 @@ struct fymd_renderer_cfg {
     int max_active_lines;       /* >0: cap the progressive active region (rows) */
     unsigned parser_flags;      /* md4c MD_FLAG_*; 0 => renderer's default set */
     enum fymd_background background;
+    enum fymd_sgr_input sgr_input; /* input-escape policy; default FYMD_SGR_STRIP */
     const char *code_theme;     /* libfyts styling name/path; NULL => theme default */
     void *userdata;             /* opaque, propagated to fymd_renderer_get_cfg() */
 };

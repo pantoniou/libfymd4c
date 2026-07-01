@@ -64,6 +64,7 @@ static int max_active_lines = 0;
 static int table_fit_content = 0;
 static const char* style_path = NULL;
 static enum fymd_background forced_bg = FYMD_BG_AUTO;
+static enum fymd_sgr_input sgr_input = FYMD_SGR_STRIP;
 static int forced_reverse = 0;
 
 /* HTML output. */
@@ -317,6 +318,7 @@ enum {
     OPT_TABLE_SIZE,
     OPT_STYLE,
     OPT_BACKGROUND,
+    OPT_SGR,
     OPT_REVERSE,
     OPT_STREAM,
     OPT_STREAM_PROGRESSIVE,
@@ -369,6 +371,7 @@ static const struct option long_options[] = {
     { "table-size",         required_argument, NULL, OPT_TABLE_SIZE },
     { "style",              required_argument, NULL, OPT_STYLE },
     { "background",         required_argument, NULL, OPT_BACKGROUND },
+    { "sgr",                required_argument, NULL, OPT_SGR },
     { "reverse",            no_argument,       NULL, OPT_REVERSE },
     { "stream",             no_argument,       NULL, OPT_STREAM },
     { "stream-progressive", no_argument,       NULL, OPT_STREAM_PROGRESSIVE },
@@ -437,6 +440,7 @@ usage(void)
         "      --table-size=MODE  Table sizing: fill width (default) or fit to content\n"
         "      --style=FILE     YAML styling config (overrides the built-in default)\n"
         "      --background=MODE  Background for light/dark styles: auto (default), dark, light\n"
+        "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
         "      --reverse        Reverse (bubble) syntax highlighting of fenced code\n"
         "      --stream         Render incrementally (push mode)\n"
         "      --stream-progressive  Live progressive render; updates the active region in place\n"
@@ -539,6 +543,16 @@ parse_args(int argc, char** argv)
                 else if(strcmp(optarg, "auto") == 0)   forced_bg = FYMD_BG_AUTO;
                 else {
                     fprintf(stderr, "Invalid --background value: %s (use auto, dark, light)\n", optarg);
+                    exit(1);
+                }
+                break;
+
+            case OPT_SGR:
+                if(strcmp(optarg, "off") == 0)       sgr_input = FYMD_SGR_STRIP;
+                else if(strcmp(optarg, "on") == 0)   sgr_input = FYMD_SGR_KEEP;
+                else if(strcmp(optarg, "safe") == 0) sgr_input = FYMD_SGR_SAFE;
+                else {
+                    fprintf(stderr, "Invalid --sgr value: %s (use off, on, safe)\n", optarg);
                     exit(1);
                 }
                 break;
@@ -664,6 +678,7 @@ main(int argc, char** argv)
     cfg.max_active_lines = max_active_lines;
     cfg.parser_flags = parser_flags ? parser_flags : FYMD_ANSI_DEFAULT_PARSER_FLAGS;
     cfg.background = forced_bg;
+    cfg.sgr_input = sgr_input;
     if(!use_color)          cfg.flags |= FYMD_RF_NO_COLOR;
     if(table_fit_content)   cfg.flags |= FYMD_RF_TABLE_FIT;
     if(want_heal)           cfg.flags |= FYMD_RF_HEAL;

@@ -154,6 +154,8 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     if(cfg->flags & FYMD_RF_SHOW_URLS) rf |= MD_ANSI_FLAG_SHOW_URLS;
     if(cfg->flags & FYMD_RF_TABLE_FIT) rf |= MD_ANSI_FLAG_TABLE_FIT_CONTENT;
     if(cfg->flags & FYMD_RF_HEAL)      rf |= MD_ANSI_FLAG_HEAL;
+    if(cfg->sgr_input == FYMD_SGR_KEEP) rf |= MD_ANSI_FLAG_SGR_KEEP;
+    else if(cfg->sgr_input == FYMD_SGR_SAFE) rf |= MD_ANSI_FLAG_SGR_SAFE;
     r->renderer_flags = rf;
 
     r->parser_flags = cfg->parser_flags ? cfg->parser_flags : MD4C_ANSI_PARSER_FLAGS;

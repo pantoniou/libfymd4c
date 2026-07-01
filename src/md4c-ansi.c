@@ -167,6 +167,9 @@ struct MD_ANSI_tag {
     MD_SIZE code_lang_size;
     char* code_buf;         /* buffered raw code text */
     MD_SIZE code_size, code_cap;
+
+    char* sgr_buf;          /* scratch for filtering escapes out of input text */
+    MD_SIZE sgr_cap;
 };
 
 
@@ -884,6 +887,31 @@ sgr_build(const SGR_STATE* s, char* out, size_t cap)
     if(n == 0)
         return 0;
     return (size_t) snprintf(out, cap, "\x1b[%sm", params);
+}
+
+/* Filter ANSI escape sequences out of a run of input text into `out` (which
+ * must have room for at least `size` bytes), per the renderer's SGR policy:
+ *   strip (neither flag) : drop every escape sequence.
+ *   SAFE                 : keep only SGR (CSI ... 'm'); drop the rest.
+ *   KEEP                 : handled by the caller (no filtering).
+ * Returns the number of bytes written to `out`. */
+static MD_SIZE
+sgr_filter_input(unsigned flags, const char* in, MD_SIZE size, char* out)
+{
+    MD_SIZE i = 0, o = 0;
+    int safe = (flags & MD_ANSI_FLAG_SGR_SAFE) != 0;
+    while(i < size) {
+        MD_SIZE e = ansi_esc_len(in + i, size - i);
+        if(e == 0) { out[o++] = in[i++]; continue; }
+        /* SAFE keeps SGR (CSI sequences ending in 'm'); everything else drops. */
+        if(safe && e >= 3 && (unsigned char) in[i] == 0x1b && in[i + 1] == '['
+           && in[i + e - 1] == 'm') {
+            memcpy(out + o, in + i, e);
+            o += e;
+        }
+        i += e;
+    }
+    return o;
 }
 
 /* Display width of a buffer, ignoring ANSI escape sequences. */
@@ -1964,6 +1992,24 @@ text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdat
         return 0;
     }
 
+    /* Filter ANSI escape sequences carried in the raw input text (normal text,
+     * code, math) unless passthrough (KEEP) is requested. Escapes never appear
+     * in the synthetic text types (BR/entity/...), so only these carry them. */
+    if((type == MD_TEXT_NORMAL || type == MD_TEXT_CODE || type == MD_TEXT_LATEXMATH)
+       && !(r->flags & MD_ANSI_FLAG_SGR_KEEP)
+       && size > 0 && memchr(text, 0x1b, size) != NULL) {
+        if(r->sgr_cap < size) {
+            char* p = (char*) realloc(r->sgr_buf, size);
+            if(p != NULL) { r->sgr_buf = p; r->sgr_cap = size; }
+        }
+        if(r->sgr_cap >= size) {
+            size = sgr_filter_input(r->flags, text, size, r->sgr_buf);
+            text = r->sgr_buf;
+            if(size == 0)
+                return 0;   /* the chunk was entirely stripped escapes */
+        }
+    }
+
     switch(type) {
         case MD_TEXT_NULLCHAR:
             render_utf8_codepoint(r, 0x0000, render_verbatim);
@@ -2150,6 +2196,7 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
             flush_wrapped(&render);
         free(render.lbuf);
         free(render.code_buf);
+        free(render.sgr_buf);
 
         /* Free any table left dangling by an aborted parse. */
         if(render.table != NULL)

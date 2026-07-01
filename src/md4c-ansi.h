@@ -51,6 +51,12 @@ extern "C"
  * instead of always expanding columns to fill the full width. */
 #define MD_ANSI_FLAG_TABLE_FIT_CONTENT 0x0020
 #define MD_ANSI_FLAG_HEAL 0x0100
+/* Passthrough of ANSI escape sequences embedded in the input text. With neither
+ * bit set (the default) they are stripped; KEEP passes them through unchanged;
+ * SAFE passes only SGR (colour/attribute) sequences and strips the rest (cursor
+ * moves, screen clears, OSC, ...). KEEP takes precedence if both are set. */
+#define MD_ANSI_FLAG_SGR_KEEP 0x0200
+#define MD_ANSI_FLAG_SGR_SAFE 0x0400
 
     /* Render Markdown into ANSI terminal output.
      *
