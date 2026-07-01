@@ -135,6 +135,8 @@ struct MD_ANSI_tag {
     int in_code_block;
     int need_newline;       /* pending newline before next block */
     int need_indent;        /* emit indent prefix on next code text */
+    int code_col;           /* display column within the current code line (clip) */
+    int code_clip;          /* max code-content columns per line; 0 = no clip */
     int li_opened;          /* just opened a list item (bullet already printed) */
 
     MD_ANSI_TABLE* table;   /* non-NULL while inside a table block */
@@ -1257,19 +1259,45 @@ render_code_rule(MD_ANSI* r, const char* lang, MD_SIZE lang_size)
     render_newline(r);
 }
 
+/* Byte length of the longest prefix of buf (raw UTF-8, no ANSI escapes) that
+ * fits within `width` display columns. */
+static MD_SIZE
+ansi_clip_bytes(const char* buf, MD_SIZE size, int width)
+{
+    MD_SIZE i = 0;
+    int w = 0;
+    while(i < size) {
+        unsigned cp;
+        MD_SIZE cl = ansi_utf8_decode(buf + i, size - i, &cp);
+        int cw = cp_width(cp);
+        if(w + cw > width)
+            break;
+        w += cw;
+        i += cl;
+    }
+    return i;
+}
+
 /* Emit the buffered code block as plain dim text (the pre-highlighting path,
- * also the fallback when highlighting is unavailable or fails). */
+ * also the fallback when highlighting is unavailable or fails). Long lines are
+ * clipped to the prose right margin (like glow); wrap_cols == 0 = no clip. */
 static void
 emit_plain_code(MD_ANSI* r)
 {
     MD_SIZE i, start = 0;
+    int avail = (r->wrap_cols > 0)
+                ? r->wrap_cols - ansi_indent_width(r) - 2 - DOC_MARGIN : 0;
+    if(r->wrap_cols > 0 && avail < 1) avail = 1;
     render_ansi(r, r->style->code_block.on);
     for(i = 0; i <= r->code_size; i++) {
         if(i == r->code_size || r->code_buf[i] == '\n') {
             if(i > start) {
+                MD_SIZE len = i - start;
                 render_indent(r);
                 RENDER_VERBATIM(r, "  ");
-                render_verbatim(r, r->code_buf + start, i - start);
+                if(avail > 0)
+                    len = ansi_clip_bytes(r->code_buf + start, len, avail);
+                render_verbatim(r, r->code_buf + start, len);
             }
             if(i < r->code_size)
                 render_newline(r);
@@ -1307,6 +1335,12 @@ emit_highlighted_code(MD_ANSI* r)
     void (*saved_out)(const MD_CHAR*, MD_SIZE, void*);
     void* saved_ud;
     int rc, reverse = r->style->code_reverse;
+    /* Clip width for fyts: 0 (no wrap / MD_ANSI_WIDTH_INF) means no clipping,
+     * matching prose. fyts subtracts the line_prefix (indent + 2-space margin)
+     * itself, so reserving DOC_MARGIN here lands the content inside the rule box.
+     * The header/footer rules below still need a finite width, so they fall back
+     * to the terminal width separately. */
+    int clip_width = (r->wrap_cols > 0) ? r->wrap_cols - DOC_MARGIN : 0;
 
     if(r->code_lang_size == 0 || r->code_size == 0)
         return 0;
@@ -1341,6 +1375,9 @@ emit_highlighted_code(MD_ANSI* r)
         cfg.styling_path = r->style->code_theme;
     cfg.reverse = reverse;
     cfg.line_prefix = prefix;
+    /* fyts clips each line to `width`, subtracting the line_prefix width itself;
+     * this leaves a content width matching the prose/header right margin. */
+    cfg.width = clip_width;
     cfg.write = ansi_fyts_write;
     cfg.write_user = r;
 
@@ -1837,8 +1874,26 @@ text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdat
                         render_indent(r);
                         RENDER_VERBATIM(r, "  ");
                         r->need_indent = 0;
+                        r->code_col = 0;
+                        /* Content sits inside the rule box: indent + 2-space code
+                         * margin on the left, prose right margin on the right. */
+                        r->code_clip = (r->wrap_cols > 0)
+                            ? r->wrap_cols - ansi_indent_width(r) - 2 - DOC_MARGIN : 0;
+                        if(r->wrap_cols > 0 && r->code_clip < 1) r->code_clip = 1;
                     }
-                    render_verbatim(r, text, size);
+                    /* Clip the line to the prose right margin (wrap_cols == 0 =
+                     * unlimited); a line may arrive over several callbacks. */
+                    if(r->code_clip > 0) {
+                        int budget = r->code_clip - r->code_col;
+                        MD_SIZE len;
+                        if(budget <= 0)
+                            break;   /* rest of this line is past the margin */
+                        len = ansi_clip_bytes(text, size, budget);
+                        r->code_col += ansi_disp_width(text, len);
+                        render_verbatim(r, text, len);
+                    } else {
+                        render_verbatim(r, text, size);
+                    }
                 }
             } else {
                 /* Inline code span */
