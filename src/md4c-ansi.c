@@ -131,13 +131,24 @@ struct MD_ANSI_tag {
     int image_nesting_level;
     int quote_depth;
     int list_depth;
-    int ol_counter;
     int in_code_block;
     int need_newline;       /* pending newline before next block */
     int need_indent;        /* emit indent prefix on next code text */
     int code_col;           /* display column within the current code line (clip) */
     int code_clip;          /* max code-content columns per line; 0 = no clip */
     int li_opened;          /* just opened a list item (bullet already printed) */
+    int line_dirty;         /* content emitted on the current line, no newline yet */
+
+    /* Stack of open lists (UL/OL), one entry per nesting level, so a nested
+     * list's marker type and counter don't leak from its parent. */
+#define MD_ANSI_MAX_LIST 32
+    struct {
+        int ordered;        /* 1 = ordered (numbered), 0 = bullet */
+        int counter;        /* next number for ordered lists */
+        int tight;          /* md4c is_tight: no blank line between items */
+        int seen;           /* an item has already been rendered in this list */
+    } lists[MD_ANSI_MAX_LIST];
+    int list_sp;            /* number of open lists (stack depth) */
 
     MD_ANSI_TABLE* table;   /* non-NULL while inside a table block */
     int table_width;        /* >0 fixed, 0 = unlimited, <0 = auto-detect */
@@ -220,6 +231,8 @@ static void
 out_direct(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
     r->process_output(text, size, r->userdata);
+    if(size > 0)
+        r->line_dirty = (text[size - 1] != '\n');
     if(r->flags & MD_ANSI_FLAG_CODE_META)
         r->output_offset += size;
 }
@@ -239,6 +252,8 @@ lbuf_append(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
     }
     memcpy(r->lbuf + r->lsize, text, size);
     r->lsize += size;
+    if(size > 0)
+        r->line_dirty = 1;   /* buffered content will be flushed onto this line */
 }
 
 static inline void
@@ -367,10 +382,25 @@ render_newline(MD_ANSI* r)
         out_direct(r, "\n", 1);
 }
 
-/* Render a blank separator line with alert bar prefix when inside an alert. */
+/* Render a blank separator line. Inside a blockquote the quote bar(s) are kept
+ * so the empty line still reads as part of the quote (like glow / GitHub). */
 static void
 render_separator(MD_ANSI* r)
 {
+    if(r->quote_depth > 0) {
+        int i, saved = r->wrap_suspend;
+        r->wrap_suspend = 1;             /* emit the bars straight to output */
+        for(i = 0; i < DOC_MARGIN; i++)
+            RENDER_VERBATIM(r, " ");
+        for(i = 0; i < r->quote_depth; i++) {
+            render_ansi(r, r->style->blockquote.on);
+            RENDER_VERBATIM(r, r->style->blockquote_bar);
+            render_ansi(r, r->style->blockquote.off);
+            if(i + 1 < r->quote_depth)
+                RENDER_VERBATIM(r, " ");
+        }
+        r->wrap_suspend = saved;
+    }
     render_newline(r);
 }
 
@@ -1515,22 +1545,36 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             break;
 
         case MD_BLOCK_UL:
-            if(r->need_newline && r->list_depth == 0) {
-                render_separator(r);
-                r->need_newline = 0;
-            }
-            break;
-
         case MD_BLOCK_OL:
             if(r->need_newline && r->list_depth == 0) {
                 render_separator(r);
                 r->need_newline = 0;
             }
-            r->ol_counter = ((MD_BLOCK_OL_DETAIL*)detail)->start;
+            /* A nested list starts on its own line: end the parent item's line
+             * (tight items carry their text with no closing paragraph). */
+            if(r->list_sp > 0 && r->line_dirty)
+                render_newline(r);
+            if(r->list_sp < MD_ANSI_MAX_LIST) {
+                r->lists[r->list_sp].ordered = (type == MD_BLOCK_OL);
+                r->lists[r->list_sp].counter =
+                    (type == MD_BLOCK_OL) ? ((MD_BLOCK_OL_DETAIL*)detail)->start : 0;
+                r->lists[r->list_sp].tight = (type == MD_BLOCK_OL)
+                    ? ((MD_BLOCK_OL_DETAIL*)detail)->is_tight
+                    : ((MD_BLOCK_UL_DETAIL*)detail)->is_tight;
+                r->lists[r->list_sp].seen = 0;
+            }
+            r->list_sp++;
             break;
 
         case MD_BLOCK_LI: {
             const MD_BLOCK_LI_DETAIL* li = (const MD_BLOCK_LI_DETAIL*)detail;
+            int top = r->list_sp - 1;
+            /* Loose lists put a blank line between items (after the first). */
+            if(top >= 0 && top < MD_ANSI_MAX_LIST && r->lists[top].seen
+               && !r->lists[top].tight)
+                render_separator(r);
+            if(top >= 0 && top < MD_ANSI_MAX_LIST)
+                r->lists[top].seen = 1;
             render_indent(r);
             if(li->is_task) {
                 if(li->task_mark == 'x' || li->task_mark == 'X') {
@@ -1540,21 +1584,18 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 } else {
                     RENDER_VERBATIM(r, "[ ] ");
                 }
+            } else if(top >= 0 && top < MD_ANSI_MAX_LIST && r->lists[top].ordered) {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d. ", r->lists[top].counter);
+                render_ansi(r, r->style->list_marker.on);
+                RENDER_VERBATIM(r, buf);
+                render_ansi(r, r->style->list_marker.off);
+                r->lists[top].counter++;
             } else {
-                /* Check parent: is this inside OL or UL? We track via ol_counter. */
-                if(r->ol_counter > 0) {
-                    char buf[16];
-                    snprintf(buf, sizeof(buf), "%d. ", r->ol_counter);
-                    render_ansi(r, r->style->list_marker.on);
-                    RENDER_VERBATIM(r, buf);
-                    render_ansi(r, r->style->list_marker.off);
-                    r->ol_counter++;
-                } else {
-                    render_ansi(r, r->style->list_marker.on);
-                    RENDER_VERBATIM(r, r->style->list_bullet);
-                    RENDER_VERBATIM(r, " ");
-                    render_ansi(r, r->style->list_marker.off);
-                }
+                render_ansi(r, r->style->list_marker.on);
+                RENDER_VERBATIM(r, r->style->list_bullet);
+                RENDER_VERBATIM(r, " ");
+                render_ansi(r, r->style->list_marker.off);
             }
             r->list_depth++;
             r->li_opened = 1;
@@ -1724,20 +1765,21 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             break;
 
         case MD_BLOCK_UL:
-            r->ol_counter = 0;
-            r->li_opened = 0;
-            r->need_newline = 1;
-            break;
-
         case MD_BLOCK_OL:
-            r->ol_counter = 0;
+            if(r->list_sp > 0)
+                r->list_sp--;
             r->li_opened = 0;
-            r->need_newline = 1;
+            /* Only a top-level list forces a blank line before the next block. */
+            if(r->list_sp == 0)
+                r->need_newline = 1;
             break;
 
         case MD_BLOCK_LI:
             r->list_depth--;
-            render_newline(r);
+            /* End the item's own line; if it already ended (e.g. with a nested
+             * list or a closing paragraph) don't add a spurious blank line. */
+            if(r->line_dirty)
+                render_newline(r);
             break;
 
         case MD_BLOCK_HR:
