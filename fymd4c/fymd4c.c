@@ -57,8 +57,12 @@ static ColorMode color_mode = COLOR_AUTO;
 static int ansi_width = FYMD_WIDTH_AUTO; /* >0 fixed, 0 inf, <0 auto */
 
 /* ANSI streaming (push) mode. */
+enum stream_mode { STREAM_MODE_WHOLE, STREAM_MODE_LINE, STREAM_MODE_BYTE,
+                   STREAM_MODE_SIZE };
 static int want_stream = 0;
 static int stream_chunk = 0;        /* push chunk size; 0 => default (undocumented) */
+static int stream_mode = STREAM_MODE_SIZE;  /* how the input is chopped into pushes */
+static int stream_delay_ms = 0;     /* pause between pushes (progressive viewing) */
 static int want_stream_progressive = 0;
 static int max_active_lines = 0;
 static int table_fit_content = 0;
@@ -159,43 +163,81 @@ read_all(FILE* in, struct membuffer* buf)
  * lineage). When `live` (a terminal in progressive mode), updates are applied
  * with cursor control; otherwise a virtual screen is reconstructed and written
  * at the end (deterministic; matches the one-shot render). */
+/* Size of the next push chunk starting at data[off], per the selected mode:
+ *   whole - the entire remaining input in one push,
+ *   line  - up to and including the next newline (one source line),
+ *   byte  - a single byte,
+ *   size  - stream_chunk bytes (default: a large block).
+ */
+static size_t
+next_chunk(const char* data, size_t size, size_t off)
+{
+    size_t rem = size - off;
+
+    switch(stream_mode) {
+    case STREAM_MODE_WHOLE:
+        return rem;
+    case STREAM_MODE_LINE: {
+        const char* nl = (const char*) memchr(data + off, '\n', rem);
+        return nl ? (size_t)(nl - (data + off)) + 1 : rem;
+    }
+    case STREAM_MODE_BYTE:
+        return 1;
+    default: {
+        size_t want = stream_chunk > 0 ? (size_t) stream_chunk : 8192;
+        return rem < want ? rem : want;
+    }
+    }
+}
+
+static void
+stream_pause(void)
+{
+    struct timespec ts;
+
+    if(stream_delay_ms <= 0)
+        return;
+    ts.tv_sec = stream_delay_ms / 1000;
+    ts.tv_nsec = (long)(stream_delay_ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+}
+
 static int
 process_ansi_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live)
 {
+    struct membuffer input = {0};
     struct membuffer scr = {0};
-    char rbuf[8192];
-    long rd;
-    size_t want;
-    int infd = fymd_fileno(in);
     size_t active_rows = 0;
+    size_t off;
     int ret = 0;
 
+    /* Buffer the whole input, then replay it in mode-sized chunks. Buffering is
+     * fine here: this is a rendering/debug tool, not an unbounded pipe. */
+    read_all(in, &input);
     if(!live)
         membuf_init(&scr, 8192);
 
-    want = (stream_chunk > 0 && (size_t) stream_chunk < sizeof(rbuf))
-         ? (size_t) stream_chunk : sizeof(rbuf);
-
-    while((rd = (long) fymd_read(infd, rbuf, want)) > 0) {
+    for(off = 0; off < input.size; ) {
         struct fymd_update upd;
-        if(fymd_render_push(r, rbuf, (size_t) rd, &upd) != 0) { ret = -1; break; }
+        size_t n = next_chunk(input.data, input.size, off);
+        size_t b;
 
+        if(fymd_render_push(r, input.data + off, n, &upd) != 0) { ret = -1; break; }
+        off += n;
+
+        b = (upd.backtrack > active_rows) ? active_rows : upd.backtrack;
         if(live) {
-            if(upd.backtrack > 0) {
-                size_t b = (upd.backtrack > active_rows) ? active_rows : upd.backtrack;
+            if(b > 0) {
                 char esc[32];
                 int m = snprintf(esc, sizeof(esc), "\033[%uA\r\033[J", (unsigned) b);
                 fwrite(esc, 1, (size_t) m, out);
-                active_rows -= b;
             }
             if(upd.content_len > 0)
                 fwrite(upd.content, 1, upd.content_len, out);
             fflush(out);
-            active_rows += count_nl(upd.content, upd.content_len);
-            active_rows = (upd.freeze >= active_rows) ? 0 : active_rows - upd.freeze;
         } else {
             size_t pos = scr.size, k;
-            for(k = 0; k < upd.backtrack && pos > 0; k++) {
+            for(k = 0; k < b && pos > 0; k++) {
                 pos--;
                 while(pos > 0 && scr.data[pos - 1] != '\n') pos--;
             }
@@ -203,12 +245,47 @@ process_ansi_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live)
             if(upd.content_len > 0)
                 membuf_append(&scr, upd.content, upd.content_len);
         }
+        active_rows -= b;
+        active_rows += count_nl(upd.content, upd.content_len);
+        active_rows = (upd.freeze >= active_rows) ? 0 : active_rows - upd.freeze;
+        stream_pause();
+    }
+
+    /* Final flush: the healed end-state of the still-active region. Rewind over
+     * the rows the last push drew (the active region shown on screen) so the
+     * finish output replaces them rather than appending a duplicate below. */
+    if(ret == 0) {
+        const char* fin = NULL;
+        size_t fin_len = 0;
+        if(fymd_render_finish(r, &fin, &fin_len) != 0) {
+            ret = -1;
+        } else if(live) {
+            if(active_rows > 0) {
+                char esc[32];
+                int m = snprintf(esc, sizeof(esc), "\033[%uA\r\033[J",
+                                 (unsigned) active_rows);
+                fwrite(esc, 1, (size_t) m, out);
+            }
+            if(fin_len > 0)
+                fwrite(fin, 1, fin_len, out);
+            fflush(out);
+        } else {
+            size_t pos = scr.size, k;
+            for(k = 0; k < active_rows && pos > 0; k++) {
+                pos--;
+                while(pos > 0 && scr.data[pos - 1] != '\n') pos--;
+            }
+            scr.size = pos;
+            if(fin_len > 0)
+                membuf_append(&scr, fin, fin_len);
+        }
     }
 
     if(!live && ret == 0)
         fwrite(scr.data, 1, scr.size, out);
 
     membuf_fini(&scr);
+    membuf_fini(&input);
     return ret;
 }
 
@@ -324,6 +401,8 @@ enum {
     OPT_STREAM_PROGRESSIVE,
     OPT_MAX_ACTIVE_LINES,
     OPT_STREAM_CHUNK,
+    OPT_STREAM_MODE,
+    OPT_STREAM_DELAY,
     OPT_REPLAY_FUZZ,
 
     /* HTML / dialect */
@@ -377,6 +456,8 @@ static const struct option long_options[] = {
     { "stream-progressive", no_argument,       NULL, OPT_STREAM_PROGRESSIVE },
     { "max-active-lines",   required_argument, NULL, OPT_MAX_ACTIVE_LINES },
     { "stream-chunk",       required_argument, NULL, OPT_STREAM_CHUNK },
+    { "stream-mode",        required_argument, NULL, OPT_STREAM_MODE },
+    { "stream-delay",       required_argument, NULL, OPT_STREAM_DELAY },
 
     /* HTML */
     { "full-html",          no_argument,       NULL, 'f' },
@@ -445,6 +526,9 @@ usage(void)
         "      --stream         Render incrementally (push mode)\n"
         "      --stream-progressive  Live progressive render; updates the active region in place\n"
         "      --max-active-lines=N  Cap the streaming active region to N input lines (0 = unlimited)\n"
+        "      --stream-mode=MODE  How input is chopped into pushes: whole, line, byte (implies --stream)\n"
+        "      --stream-chunk=N    Push N bytes at a time (implies --stream)\n"
+        "      --stream-delay=MS   Pause MS milliseconds between pushes (watch the reconstruction)\n"
         "\n"
         "HTML output options (--format=html):\n"
         "  -f, --full-html      Generate a full HTML document, including header\n"
@@ -573,7 +657,31 @@ parse_args(int argc, char** argv)
                     fprintf(stderr, "Invalid --stream-chunk value: %s\n", optarg);
                     exit(1);
                 }
+                stream_mode = STREAM_MODE_SIZE;
+                want_stream = 1;
                 break;
+
+            case OPT_STREAM_MODE:
+                if(strcmp(optarg, "whole") == 0)      stream_mode = STREAM_MODE_WHOLE;
+                else if(strcmp(optarg, "line") == 0)  stream_mode = STREAM_MODE_LINE;
+                else if(strcmp(optarg, "byte") == 0)  stream_mode = STREAM_MODE_BYTE;
+                else {
+                    fprintf(stderr, "Invalid --stream-mode value: %s "
+                            "(use whole, line, or byte)\n", optarg);
+                    exit(1);
+                }
+                want_stream = 1;
+                break;
+
+            case OPT_STREAM_DELAY: {
+                long n = atol(optarg);
+                if(n < 0) {
+                    fprintf(stderr, "Invalid --stream-delay value: %s\n", optarg);
+                    exit(1);
+                }
+                stream_delay_ms = (int) n;
+                break;
+            }
 
             case OPT_WIDTH:
                 if(strcmp(optarg, "auto") == 0) {

@@ -60,6 +60,13 @@ extern "C"
 /* Render the whole document as a "card": every line is padded to the full width
  * with the theme background (like the fenced-code bubble, but document-wide). */
 #define MD_ANSI_FLAG_REVERSE 0x0800
+/* Suppress the footer rule of a fenced code block that is the last block of the
+ * document and was closed at end-of-input rather than by a real closing fence.
+ * Used by the streaming layer for non-final renders: while a code block is still
+ * being received its bottom decoration would otherwise flap around (and garble
+ * once the render reaches the terminal's bottom row). The footer is drawn only
+ * at finish, when the block is truly closed. */
+#define MD_ANSI_FLAG_STREAM_OPEN_CODE 0x1000
 
     /* Render Markdown into ANSI terminal output.
      *

@@ -111,27 +111,255 @@ struct MD4C_STREAM {
     size_t anchor;        /* input offset of the last confirmed sync point */
     int emitted;          /* non-zero once any committed output has been returned */
     int finished;
+
+    /* Code-fence continuation: set when `anchor` sits inside an open fenced code
+     * block (the fence's opening line and header have already been committed). In
+     * this state the active region no longer starts a fence of its own, so it is
+     * rendered as a continuation -- a synthetic "```<lang>\n" is prepended before
+     * rendering and the resulting header line is dropped -- giving header-less,
+     * correctly-indented/highlighted body lines. Programming languages are
+     * verbatim and forward-only, so every code line is a safe commit point;
+     * markup languages (markdown/rst) have backward dependencies and are never
+     * committed mid-fence (see next_sync_offset). */
+    int in_code_body;
+    char code_lang[64];
+    size_t code_lang_size;
+    char code_fence_ch;      /* fence delimiter of the open fence: '`' or '~' */
+    size_t code_fence_len;   /* opening delimiter run length (>= 3) */
 };
 
+/* If line[k..llen) starts a fence delimiter run, return its length (>= 3) and
+ * set *ch_out to the delimiter -- else 0. Backtick fences whose info string
+ * contains a backtick are not fences (CommonMark), so they are rejected here;
+ * tilde info strings may contain anything. */
+static size_t
+fence_open_run(const char* line, size_t llen, size_t k, char* ch_out)
+{
+    size_t n = 0, j;
+    char c;
+
+    if(k >= llen)
+        return 0;
+    c = line[k];
+    if(c != '`' && c != '~')
+        return 0;
+    while(k + n < llen && line[k + n] == c) n++;
+    if(n < 3)
+        return 0;
+    if(c == '`') {
+        for(j = k + n; j < llen; j++)
+            if(line[j] == '`')
+                return 0;
+    }
+    *ch_out = c;
+    return n;
+}
+
+/* Does line[k..llen) close a fence opened by a run of `len` `ch` characters?
+ * CommonMark: same delimiter, a run at least as long as the opener, and nothing
+ * but whitespace after it. */
+static int
+fence_close_line(const char* line, size_t llen, size_t k, char ch, size_t len)
+{
+    size_t n = 0, j;
+
+    while(k + n < llen && line[k + n] == ch) n++;
+    if(n < len)
+        return 0;
+    for(j = k + n; j < llen; j++)
+        if(line[j] != ' ' && line[j] != '\t' && line[j] != '\r')
+            return 0;
+    return 1;
+}
+
+/* Does [data, data+size) end inside an unclosed, top-level fenced code block?
+ * Scans line by line tracking fence open/close (a fence line is >=3 back-ticks
+ * or tildes after optional indent); the region ends "open" when the final state
+ * is inside a fence. Used to request footer suppression (MD_ANSI_FLAG_STREAM_
+ * OPEN_CODE) only while a code block is still streaming, so its bottom rule is
+ * not redrawn on every push. */
+static int
+region_ends_open_fence(const char* data, size_t size)
+{
+    size_t i = 0, line_start = 0, fence_len = 0, run;
+    int in_fence = 0, fence_col0 = 0;
+    char fence_ch = 0;
+
+    while(i <= size) {
+        if(i == size || data[i] == '\n') {
+            const char* line = data + line_start;
+            size_t llen = (size_t)(i - line_start);
+            size_t k = 0;
+            while(k < llen && (line[k] == ' ' || line[k] == '\t')) k++;
+            if(in_fence) {
+                if(fence_close_line(line, llen, k, fence_ch, fence_len))
+                    in_fence = 0;
+            } else {
+                run = fence_open_run(line, llen, k, &fence_ch);
+                if(run) {
+                    in_fence = 1;
+                    fence_len = run;
+                    fence_col0 = (k == 0);
+                }
+            }
+            line_start = i + 1;
+        }
+        i++;
+    }
+    /* Only a column-0 fence is known to be a top-level code block whose footer
+     * the renderer may defer; an indented one may sit inside a list/quote. */
+    return in_fence && fence_col0;
+}
+
+/* Is `lang` a markup language whose fenced-code content has backward
+ * dependencies (a later line can restyle an earlier one: setext headings,
+ * tables, reference definitions)? Such fences are never committed mid-block --
+ * only the closing fence is a safe point. Everything else (real programming
+ * languages) is verbatim and forward-only. */
+static int
+lang_is_markup(const char* lang, size_t n)
+{
+    static const char* const markup[] = {
+        "markdown", "md", "mkd", "mdown", "rst", "rest", "restructuredtext"
+    };
+    size_t i, k;
+
+    for(i = 0; i < sizeof(markup) / sizeof(markup[0]); i++) {
+        size_t ml = strlen(markup[i]);
+        if(ml != n)
+            continue;
+        for(k = 0; k < n; k++) {
+            char c = lang[k];
+            if(c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+            if(c != markup[i][k]) break;
+        }
+        if(k == n) return 1;
+    }
+    return 0;
+}
+
+/* Fence state at byte `offset`: scanning data[0:offset] line by line, returns 1
+ * if `offset` lies inside an open fenced code block, filling `lang_out` with the
+ * fence's info-string language (first word) and *ch_out and *len_out with the fence
+ * delimiter and opening run length -- else 0. Used to (re)establish the
+ * continuation state after the anchor advances. */
+static int
+fence_context(const char* data, size_t offset, char* lang_out, size_t lang_cap,
+              size_t* lang_len, char* ch_out, size_t* len_out)
+{
+    size_t i = 0, line_start = 0, fence_len = 0, run;
+    int in_fence = 0, fence_col0 = 0;
+    char fence_ch = 0;
+
+    if(lang_len) *lang_len = 0;
+    if(lang_cap > 0) lang_out[0] = '\0';
+
+    while(i < offset) {
+        if(data[i] == '\n') {
+            const char* line = data + line_start;
+            size_t llen = (size_t)(i - line_start);
+            size_t k = 0;
+            while(k < llen && (line[k] == ' ' || line[k] == '\t')) k++;
+            if(in_fence) {
+                if(fence_close_line(line, llen, k, fence_ch, fence_len))
+                    in_fence = 0;
+            } else if((run = fence_open_run(line, llen, k, &fence_ch)) != 0) {
+                size_t j, n;
+                in_fence = 1;
+                fence_len = run;
+                fence_col0 = (k == 0);
+                /* Info string: skip the fence chars, then leading spaces; take
+                 * up to the first whitespace as the language. */
+                j = k + run;
+                while(j < llen && (line[j] == ' ' || line[j] == '\t')) j++;
+                n = 0;
+                while(j < llen && line[j] != ' ' && line[j] != '\t'
+                      && n + 1 < lang_cap) {
+                    lang_out[n++] = line[j++];
+                }
+                lang_out[n] = '\0';
+                if(lang_len) *lang_len = n;
+            }
+            line_start = i + 1;
+        }
+        i++;
+    }
+    if(ch_out) *ch_out = fence_ch;
+    if(len_out) *len_out = fence_len;
+    /* Continuation state only holds for a column-0 (top-level) fence: the
+     * synthetic opener is rendered at column 0, so an indented fence (inside a
+     * list/quote) would re-render with the wrong context. Anchors never land
+     * inside indented fences (next_sync_offset does not commit there). */
+    return in_fence && fence_col0;
+}
+
 /* Render `input_size` bytes of input into `buf`. When `heal` is set, the
- * renderer's heal-before-render path closes dangling markers first. 0 / -1. */
+ * renderer's heal-before-render path closes dangling markers first.
+ *
+ * When the stream is in code-fence continuation state (s->in_code_body), `input`
+ * is the interior of an already-open fence: a synthetic "```<lang>\n" opener is
+ * prepended so the renderer applies code styling, and the resulting header rule
+ * line is stripped from the output -- leaving header-less body lines that sit
+ * directly below the committed fence header.
+ *
+ * `suppress_footer_ok` allows dropping the bottom rule of a still-open trailing
+ * code block (streaming redraws); finish passes 0 so the real footer is drawn.
+ * 0 / -1. */
 static int
 stream_render(MD4C_STREAM* s, STREAM_BUF* buf, const char* input,
-              size_t input_size, int heal)
+              size_t input_size, int heal, int suppress_footer_ok)
 {
     unsigned flags = s->renderer_flags;
-    int ret;
+    char* tmp = NULL;
+    const char* rin = input;
+    size_t rlen = input_size, pre = 0;
+    int ret, open;
 
     if(heal)
         flags |= MD_ANSI_FLAG_HEAL;
     else
         flags &= ~(unsigned) MD_ANSI_FLAG_HEAL;
 
+    if(s->in_code_body) {
+        /* Prepend the fence opener (same delimiter and run length as the real
+         * one, so interior lines that look like shorter/other fences do not
+         * close it) so the body renders as an open code fence. */
+        pre = s->code_fence_len + s->code_lang_size + 1;
+        tmp = (char*) malloc(pre + input_size);
+        if(tmp == NULL)
+            return -1;
+        memset(tmp, s->code_fence_ch, s->code_fence_len);
+        memcpy(tmp + s->code_fence_len, s->code_lang, s->code_lang_size);
+        tmp[s->code_fence_len + s->code_lang_size] = '\n';
+        memcpy(tmp + pre, input, input_size);
+        rin = tmp;
+        rlen = pre + input_size;
+    }
+
+    /* The trailing code block is "open" (no closing fence yet) when the
+     * effective input ends inside a fence; suppress its footer while streaming. */
+    open = suppress_footer_ok && region_ends_open_fence(rin, rlen);
+    if(open)
+        flags |= MD_ANSI_FLAG_STREAM_OPEN_CODE;
+
     sbuf_reset(buf);
-    ret = md_ansi_ex_styled(input, (unsigned) input_size,
+    ret = md_ansi_ex_styled(rin, (unsigned) rlen,
                             sbuf_sink, buf, s->parser_flags, flags, s->width, s->style);
+    free(tmp);
     if(ret != 0 || buf->error)
         return -1;
+
+    if(s->in_code_body) {
+        /* Drop the synthetic fence header: everything up to and including the
+         * first output newline. */
+        size_t p = 0;
+        while(p < buf->size && buf->data[p] != '\n') p++;
+        if(p < buf->size) {
+            p++;
+            memmove(buf->data, buf->data + p, buf->size - p);
+            buf->size -= p;
+        }
+    }
     return 0;
 }
 
@@ -225,13 +453,22 @@ html_block_ends(const char* line, size_t llen, int type)
  * by a complete next line that starts at column 0, is non-blank and is not a
  * list item. At such a point all block containers are closed, so the renderer
  * is in its initial state and the suffix renders standalone identically to the
- * tail of a full render. Returns `from` if there is no such point. */
+ * tail of a full render.
+ *
+ * Additionally, inside a fenced code block whose language is a real programming
+ * language (not markup -- see lang_is_markup), every completed interior line is
+ * a safe point: the content is verbatim and forward-only, so committing a line
+ * never has to be undone by a later one. This lets a tall code block scroll away
+ * line by line instead of ballooning the active region. The committed segment is
+ * still render-verified (memcmp) by the caller, so a misdetected fence is never
+ * acted on. Returns `from` if there is no such point. */
 static size_t
 next_sync_offset(const char* data, size_t size, size_t from)
 {
-    size_t i = 0, line_start = 0, best = from;
-    int in_fence = 0;
+    size_t i = 0, line_start = 0, best = from, fence_len = 0, run;
+    int in_fence = 0, fence_col0 = 0;
     char fence_ch = 0;
+    int fence_markup = 0;
     int in_html = 0, html_type = 0;
 
     while(i <= size) {
@@ -239,21 +476,34 @@ next_sync_offset(const char* data, size_t size, size_t from)
             const char* line = data + line_start;
             size_t llen = (size_t)(i - line_start);
             size_t k = 0;
-            int is_fence;
             while(k < llen && (line[k] == ' ' || line[k] == '\t')) k++;
-            is_fence = (llen - k >= 3)
-                && ((line[k] == '`' && line[k + 1] == '`' && line[k + 2] == '`')
-                    || (line[k] == '~' && line[k + 1] == '~' && line[k + 2] == '~'));
 
             if(in_fence) {
-                if(is_fence && line[k] == fence_ch) in_fence = 0;
+                if(fence_close_line(line, llen, k, fence_ch, fence_len))
+                    in_fence = 0;
+                /* Completed a verbatim body line of a column-0 programming-
+                 * language fence (not the closing fence): a safe interior
+                 * commit point. Indented fences (inside lists/quotes) are not
+                 * committed mid-block -- the continuation render could not
+                 * reproduce their container context. */
+                else if(!fence_markup && fence_col0 && i < size)
+                    best = i + 1;
             } else if(in_html) {
                 /* A blank line inside a type 1-5 HTML block does not close it,
                  * so it is not a sync point; wait for the block's end marker. */
                 if(html_block_ends(line, llen, html_type)) in_html = 0;
-            } else if(is_fence) {
+            } else if((run = fence_open_run(line, llen, k, &fence_ch)) != 0) {
+                size_t j, ls;
                 in_fence = 1;
-                fence_ch = line[k];
+                fence_len = run;
+                fence_col0 = (k == 0);
+                /* Info string language (first word after the fence chars). */
+                j = k + run;
+                while(j < llen && (line[j] == ' ' || line[j] == '\t')) j++;
+                ls = 0;
+                while(j + ls < llen && line[j + ls] != ' ' && line[j + ls] != '\t')
+                    ls++;
+                fence_markup = lang_is_markup(line + j, ls);
             } else {
                 int t = html_block_start_type(line + k, llen - k);
                 if(t) {
@@ -380,13 +630,38 @@ md4c_stream_destroy(MD4C_STREAM* s)
     free(s);
 }
 
+/* Whether committed output at the current anchor needs a leading inter-block
+ * "\n" separator. Inside a code-fence continuation the active region is body
+ * lines that sit flush under the committed fence, so no separator is inserted. */
+static int
+stream_needs_sep(MD4C_STREAM* s)
+{
+    return s->emitted && !s->in_code_body;
+}
+
+/* Re-establish the code-fence continuation state from the current anchor: set
+ * in_code_body (and the remembered language) when the anchor now sits inside an
+ * open fence. Call after every anchor advance. */
+static void
+stream_sync_fence(MD4C_STREAM* s)
+{
+    s->in_code_body = fence_context(s->accum.data, s->anchor,
+                                    s->code_lang, sizeof(s->code_lang),
+                                    &s->code_lang_size,
+                                    &s->code_fence_ch, &s->code_fence_len);
+}
+
 /* Build the returned slice in s->out: an inter-block "\n" separator (when some
- * committed output already preceded it) followed by `data`. */
+ * committed output already preceded it) followed by `data`. A segment that
+ * renders to nothing (e.g. a stripped HTML block) gets no separator -- it must
+ * not leave a stray blank line between its visible neighbours. */
 static int
 stream_emit(MD4C_STREAM* s, const char* data, size_t size)
 {
     sbuf_reset(&s->out);
-    if(s->emitted && sbuf_append(&s->out, "\n", 1) != 0)
+    if(size == 0)
+        return 0;
+    if(stream_needs_sep(s) && sbuf_append(&s->out, "\n", 1) != 0)
         return -1;
     if(sbuf_append(&s->out, data, size) != 0)
         return -1;
@@ -394,11 +669,14 @@ stream_emit(MD4C_STREAM* s, const char* data, size_t size)
 }
 
 /* Append another committed segment to s->out (without resetting it), with the
- * inter-block separator. Sets s->emitted so a following segment is separated. */
+ * inter-block separator. Sets s->emitted so a following segment is separated.
+ * An empty segment is a no-op (no separator, emitted unchanged). */
 static int
 stream_emit_append(MD4C_STREAM* s, const char* data, size_t size)
 {
-    if(s->emitted && sbuf_append(&s->out, "\n", 1) != 0)
+    if(size == 0)
+        return 0;
+    if(stream_needs_sep(s) && sbuf_append(&s->out, "\n", 1) != 0)
         return -1;
     if(sbuf_append(&s->out, data, size) != 0)
         return -1;
@@ -431,17 +709,18 @@ md4c_stream_push(MD4C_STREAM* s, const char* chunk, size_t len,
                                        s->anchor, s->max_active_lines, s->width);
         if(cut > s->anchor) {
             if(stream_render(s, &s->seg, s->accum.data + s->anchor,
-                             cut - s->anchor, 0) != 0)
+                             cut - s->anchor, 0, 1) != 0)
                 return -1;
             if(stream_emit_append(s, s->seg.data, s->seg.size) != 0)
                 return -1;
             s->anchor = cut;
+            stream_sync_fence(s);
         }
     }
 
     /* Render the active region (from the last sync point) for verification. */
     if(stream_render(s, &s->tail, s->accum.data + s->anchor,
-                     s->accum.size - s->anchor, 0) != 0)
+                     s->accum.size - s->anchor, 0, 1) != 0)
         return -1;
 
     /* Try to advance the anchor to the furthest safe sync point. Commit the
@@ -451,13 +730,15 @@ md4c_stream_push(MD4C_STREAM* s, const char* chunk, size_t len,
     sync = next_sync_offset(s->accum.data, s->accum.size, s->anchor);
     if(sync > s->anchor) {
         if(stream_render(s, &s->seg, s->accum.data + s->anchor,
-                         sync - s->anchor, 0) != 0)
+                         sync - s->anchor, 0, 1) != 0)
             return -1;
         if(s->seg.size <= s->tail.size
-           && memcmp(s->seg.data, s->tail.data, s->seg.size) == 0) {
+           && (s->seg.size == 0
+               || memcmp(s->seg.data, s->tail.data, s->seg.size) == 0)) {
             if(stream_emit_append(s, s->seg.data, s->seg.size) != 0)
                 return -1;
             s->anchor = sync;
+            stream_sync_fence(s);
         }
     }
 
@@ -475,9 +756,10 @@ md4c_stream_preview(MD4C_STREAM* s, const char** out, size_t* out_len)
         return -1;
 
     /* Healed render of the active region (everything after the last commit),
-     * with the inter-block separator so it sits below committed output. */
+     * with the inter-block separator so it sits below committed output. A
+     * still-open trailing fence keeps its footer suppressed (drawn at finish). */
     if(stream_render(s, &s->tail, s->accum.data + s->anchor,
-                     s->accum.size - s->anchor, s->heal) != 0)
+                     s->accum.size - s->anchor, s->heal, 1) != 0)
         return -1;
     if(stream_emit(s, s->tail.data, s->tail.size) != 0)
         return -1;
@@ -496,9 +778,10 @@ md4c_stream_finish(MD4C_STREAM* s, const char** out, size_t* out_len)
         return -1;
 
     /* Render the remaining active region (optionally healed) as the final
-     * segment, after the last committed sync point. */
+     * segment, after the last committed sync point. The block is now truly
+     * closed, so the footer is drawn (no STREAM_OPEN_CODE suppression). */
     if(stream_render(s, &s->tail, s->accum.data + s->anchor,
-                     s->accum.size - s->anchor, s->heal) != 0)
+                     s->accum.size - s->anchor, s->heal, 0) != 0)
         return -1;
     if(stream_emit(s, s->tail.data, s->tail.size) != 0)
         return -1;
@@ -572,12 +855,14 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
      * markers in the in-progress tail show closed) into s->seg, then compose
      * s->tail = leading inter-block separator (a blank line, present once
      * anything has been committed above) + that render. The separator is what
-     * joins the active region to the committed output. */
+     * joins the active region to the committed output. A trailing open fence
+     * keeps its bottom rule suppressed so it does not flap on every push; a
+     * mid-fence anchor renders the active region as a header-less continuation. */
     if(stream_render(s, &s->seg, s->accum.data + s->anchor,
-                     s->accum.size - s->anchor, s->heal) != 0)
+                     s->accum.size - s->anchor, s->heal, 1) != 0)
         return -1;
     sbuf_reset(&s->tail);
-    if(s->emitted && sbuf_append(&s->tail, "\n", 1) != 0)
+    if(stream_needs_sep(s) && sbuf_append(&s->tail, "\n", 1) != 0)
         return -1;
     if(sbuf_append(&s->tail, s->seg.data, s->seg.size) != 0)
         return -1;
@@ -597,16 +882,24 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
      * and drop out of the mutable active region. */
     sync = next_sync_offset(s->accum.data, s->accum.size, s->anchor);
     if(sync > s->anchor) {
-        size_t sep = s->emitted ? 1 : 0;
+        size_t sep = stream_needs_sep(s) ? 1 : 0;
         if(stream_render(s, &s->out, s->accum.data + s->anchor,
-                         sync - s->anchor, 0) != 0)
+                         sync - s->anchor, 0, 1) != 0)
             return -1;
         if(s->out.size <= s->seg.size
-           && memcmp(s->out.data, s->seg.data, s->out.size) == 0) {
-            freeze_bytes = sep + s->out.size;
-            upd->freeze = count_lines(s->tail.data, freeze_bytes);
+           && (s->out.size == 0
+               || memcmp(s->out.data, s->seg.data, s->out.size) == 0)) {
+            /* A segment that renders to nothing (e.g. a stripped HTML block)
+             * freezes nothing -- in particular not the separator row, which
+             * still belongs to the next visible block -- and does not mark
+             * output as emitted. */
+            if(s->out.size > 0) {
+                freeze_bytes = sep + s->out.size;
+                upd->freeze = count_lines(s->tail.data, freeze_bytes);
+                s->emitted = 1;
+            }
             s->anchor = sync;
-            s->emitted = 1;
+            stream_sync_fence(s);
         }
     }
 
@@ -621,17 +914,20 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
         size_t cut = forced_cut_offset(s->accum.data, s->accum.size,
                                        s->anchor, s->max_active_lines, s->width);
         if(cut > s->anchor) {
-            size_t sep = s->emitted ? 1 : 0;
+            size_t sep = stream_needs_sep(s) ? 1 : 0;
             size_t dropped_lines, body;
             if(stream_render(s, &s->out, s->accum.data + s->anchor,
-                             cut - s->anchor, 0) != 0)
+                             cut - s->anchor, 0, 1) != 0)
                 return -1;
             dropped_lines = count_lines(s->out.data, s->out.size);
             body = offset_after_lines(s->seg.data, s->seg.size, dropped_lines);
-            freeze_bytes = sep + body;
-            upd->freeze = count_lines(s->tail.data, freeze_bytes);
+            if(body > 0) {
+                freeze_bytes = sep + body;
+                upd->freeze = count_lines(s->tail.data, freeze_bytes);
+                s->emitted = 1;
+            }
             s->anchor = cut;
-            s->emitted = 1;
+            stream_sync_fence(s);
         }
     }
 

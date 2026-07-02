@@ -132,6 +132,7 @@ struct MD_ANSI_tag {
     int quote_depth;
     int list_depth;
     int in_code_block;
+    int code_footer_pending; /* streaming: trailing code-block footer deferred */
     int need_newline;       /* pending newline before next block */
     int need_indent;        /* emit indent prefix on next code text */
     int code_col;           /* display column within the current code line (clip) */
@@ -1636,6 +1637,13 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
 {
     MD_ANSI* r = (MD_ANSI*) userdata;
 
+    /* Another block follows a deferred trailing code block, so it was not the
+     * end of input after all: draw the footer we held back before laying it out. */
+    if(r->code_footer_pending) {
+        r->code_footer_pending = 0;
+        render_code_rule(r, NULL, 0);
+    }
+
     switch(type) {
         case MD_BLOCK_DOC:
             break;
@@ -1918,8 +1926,17 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 r->code_blocks[r->n_code_blocks].end = r->output_offset;
                 r->n_code_blocks++;
             }
-            if(done != 2)
-                render_code_rule(r, NULL, 0);   /* footer (label-less) */
+            if(done != 2) {
+                /* Streaming: defer a top-level trailing code block's footer so a
+                 * still-open fence does not flap its bottom rule on every push.
+                 * The footer is flushed on the next enter_block (if another block
+                 * follows) or silently dropped at end-of-input. */
+                if((r->flags & MD_ANSI_FLAG_STREAM_OPEN_CODE)
+                   && r->list_depth == 0 && r->quote_depth == 0)
+                    r->code_footer_pending = 1;
+                else
+                    render_code_rule(r, NULL, 0);   /* footer (label-less) */
+            }
             r->in_code_block = 0;
             r->need_newline = 1;
             break;
