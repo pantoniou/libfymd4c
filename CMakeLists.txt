@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.12)
 
-project(MD4C
-    VERSION "0.5.3"
-    HOMEPAGE_URL "https://github.com/mity/md4c"
+project(libfymd4c
+    VERSION "0.0.1"
+    HOMEPAGE_URL "https://github.com/pantoniou/libfymd4c"
     LANGUAGES C
 )
 
