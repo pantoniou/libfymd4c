@@ -29,6 +29,10 @@
 #include "md4c-stream.h"
 #include "md4c-ansi.h"
 
+#ifdef MD4C_WITH_FYTS
+    #include <fyts/fyts.h>
+#endif
+
 /******************************
  ***  Growable byte buffer  ***
  ******************************/
@@ -211,31 +215,34 @@ region_ends_open_fence(const char* data, size_t size)
     return in_fence && fence_col0;
 }
 
-/* Is `lang` a markup language whose fenced-code content has backward
- * dependencies (a later line can restyle an earlier one: setext headings,
- * tables, reference definitions)? Such fences are never committed mid-block --
- * only the closing fence is a safe point. Everything else (real programming
- * languages) is verbatim and forward-only. */
+/* Would committing a completed interior line of a fence with info-string
+ * language `lang` (length `n`, not NUL-terminated) risk being restyled by a
+ * later line? Such fences (markup with backward dependencies -- setext
+ * headings, tables, reference definitions) are never committed mid-block; only
+ * the closing fence is a safe point.
+ *
+ * The classification is delegated to libfyts rather than a hard-coded list:
+ * a fence is unsafe only when the language has a *known* grammar that is not
+ * progressive-safe. A bare fence, an unknown language, or one longer than the
+ * buffer has no grammar, so its content renders verbatim (forward-only) and is
+ * safe to commit. Without libfyts there is no highlighter at all, so fenced
+ * code is always verbatim and every fence is safe. */
 static int
-lang_is_markup(const char* lang, size_t n)
+lang_progressive_unsafe(const char* lang, size_t n)
 {
-    static const char* const markup[] = {
-        "markdown", "md", "mkd", "mdown", "rst", "rest", "restructuredtext"
-    };
-    size_t i, k;
+#ifdef MD4C_WITH_FYTS
+    char buf[64];
 
-    for(i = 0; i < sizeof(markup) / sizeof(markup[0]); i++) {
-        size_t ml = strlen(markup[i]);
-        if(ml != n)
-            continue;
-        for(k = 0; k < n; k++) {
-            char c = lang[k];
-            if(c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
-            if(c != markup[i][k]) break;
-        }
-        if(k == n) return 1;
-    }
+    if(n == 0 || n >= sizeof(buf))
+        return 0;
+    memcpy(buf, lang, n);
+    buf[n] = '\0';
+    return fyts_language_supported(buf) && !fyts_language_progressive_safe(buf);
+#else
+    (void) lang;
+    (void) n;
     return 0;
+#endif
 }
 
 /* Fence state at byte `offset`: scanning data[0:offset] line by line, returns 1
@@ -455,8 +462,8 @@ html_block_ends(const char* line, size_t llen, int type)
  * is in its initial state and the suffix renders standalone identically to the
  * tail of a full render.
  *
- * Additionally, inside a fenced code block whose language is a real programming
- * language (not markup -- see lang_is_markup), every completed interior line is
+ * Additionally, inside a fenced code block whose language renders forward-only
+ * (see lang_progressive_unsafe), every completed interior line is
  * a safe point: the content is verbatim and forward-only, so committing a line
  * never has to be undone by a later one. This lets a tall code block scroll away
  * line by line instead of ballooning the active region. The committed segment is
@@ -503,7 +510,7 @@ next_sync_offset(const char* data, size_t size, size_t from)
                 ls = 0;
                 while(j + ls < llen && line[j + ls] != ' ' && line[j + ls] != '\t')
                     ls++;
-                fence_markup = lang_is_markup(line + j, ls);
+                fence_markup = lang_progressive_unsafe(line + j, ls);
             } else {
                 int t = html_block_start_type(line + k, llen - k);
                 if(t) {
