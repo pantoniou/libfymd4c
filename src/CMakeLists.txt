@@ -41,13 +41,30 @@ file(WRITE "${_md4c_style_inc}"
 set(_fymd4c_incdir "${CMAKE_CURRENT_SOURCE_DIR}/../include")
 configure_file(libfymd4c.pc.in libfymd4c.pc @ONLY)
 
-# Prefer libfyaml's imported CMake target (clean, relocatable interface); fall
-# back to the raw library path if the package is unavailable.
+# Prefer libfyaml's imported CMake targets (clean, relocatable interface); fall
+# back to the raw library path if the package is unavailable. Keep the shared
+# and static dependencies separate so libfymd4c_static does not pull in the
+# shared libfyaml target when libfyaml's static target is installed.
 find_package(libfyaml CONFIG QUIET)
 if(TARGET libfyaml::libfyaml)
-    set(_fymd4c_fyaml libfyaml::libfyaml)
+    set(_fymd4c_fyaml_shared libfyaml::libfyaml)
 else()
-    set(_fymd4c_fyaml "${LIBFYAML_LIBRARY}")
+    set(_fymd4c_fyaml_shared "${LIBFYAML_LIBRARY}")
+endif()
+if(TARGET libfyaml::fyaml_static)
+    set(_fymd4c_fyaml_static libfyaml::fyaml_static)
+else()
+    set(_fymd4c_fyaml_static "${LIBFYAML_LIBRARY}")
+endif()
+if(NOT BUILD_SHARED_LIBS AND TARGET libfyts::fyts_static AND TARGET libfyaml::fyaml_static)
+    get_target_property(_fymd4c_fyts_static_deps libfyts::fyts_static INTERFACE_LINK_LIBRARIES)
+    if(_fymd4c_fyts_static_deps)
+        list(TRANSFORM _fymd4c_fyts_static_deps REPLACE "^libfyaml::libfyaml$" "libfyaml::fyaml_static")
+        list(TRANSFORM _fymd4c_fyts_static_deps REPLACE "^libfyaml::fyaml$" "libfyaml::fyaml_static")
+        set_target_properties(libfyts::fyts_static PROPERTIES
+            INTERFACE_LINK_LIBRARIES "${_fymd4c_fyts_static_deps}")
+    endif()
+    unset(_fymd4c_fyts_static_deps)
 endif()
 
 set(_fymd4c_sources
@@ -107,12 +124,19 @@ foreach(_t fymd4c fymd4c_static)
         target_compile_options(${_t} PRIVATE ${ASAN_C_FLAGS})
         target_link_options(${_t} PRIVATE ${ASAN_C_FLAGS} INTERFACE ${ASAN_C_FLAGS})
     endif()
-    # libfyaml is a public dependency of both flavours.
-    target_link_libraries(${_t} PUBLIC ${_fymd4c_fyaml})
     if(MD4C_WITH_FYTS)
         target_compile_definitions(${_t} PRIVATE MD4C_WITH_FYTS)
     endif()
 endforeach()
+
+# libfyaml is a public dependency of both flavours. The static fymd4c archive
+# must prefer libfyaml's static archive when the package provides it.
+if(BUILD_SHARED_LIBS)
+    target_link_libraries(fymd4c PUBLIC ${_fymd4c_fyaml_shared})
+else()
+    target_link_libraries(fymd4c PUBLIC ${_fymd4c_fyaml_static})
+endif()
+target_link_libraries(fymd4c_static PUBLIC ${_fymd4c_fyaml_static})
 
 set_target_properties(fymd4c PROPERTIES
     OUTPUT_NAME fymd4c
