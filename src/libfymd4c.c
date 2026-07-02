@@ -19,6 +19,10 @@
 
 #include <libfymd4c.h>
 
+#ifdef MD4C_WITH_FYTS
+#include <fyts/fyts.h>
+#endif
+
 #ifndef FYMD_VERSION_STRING
 #define FYMD_VERSION_STRING "0.0.0"
 #endif
@@ -402,4 +406,16 @@ const char *
 fymd_library_version(void)
 {
     return FYMD_VERSION_STRING;
+}
+
+char *
+fymd_detect_language_for_path(const char *path)
+{
+    if(path == NULL)
+        return NULL;
+#ifdef MD4C_WITH_FYTS
+    return fyts_detect_language_for_path(path);
+#else
+    return NULL;
+#endif
 }

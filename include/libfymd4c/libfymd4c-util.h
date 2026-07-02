@@ -50,6 +50,13 @@ extern "C" {
 /* Library version string, e.g. "0.5.3". */
 const char *fymd_library_version(void) FYMD_EXPORT;
 
+/* Detect the syntax-highlighter language name for a file path, from its
+ * extension, using the same catalogue the fenced-code highlighter uses (so the
+ * returned name is guaranteed usable as a fenced-code info string). Returns a
+ * newly allocated string the caller frees with fymd_free(), or NULL when the
+ * extension is unknown/unsupported or on error. */
+char *fymd_detect_language_for_path(const char *path) FYMD_EXPORT;
+
 #ifdef __cplusplus
 }
 #endif
