@@ -1,80 +1,145 @@
 name: Build and Test
 
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('Build and Test · PR #{0}', github.event.pull_request.number) ||
+      github.event_name == 'workflow_dispatch' && 'Build and Test · manual' ||
+      format('Build and Test · {0}', github.ref_name) }}
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: ${{ vars.NUMBER_OF_PROCESSORS || 2 }}
+  CTEST_PARALLEL_LEVEL: ${{ vars.NUMBER_OF_PROCESSORS || 2 }}
+  CTEST_OUTPUT_ON_FAILURE: 1
+
 on:
-  - pull_request
-  - push
+  push:
+    branches: [ master, stable, devel ]
+  pull_request:
+    branches: [ master, stable, devel ]
+  workflow_dispatch:
+    inputs:
+      ctest_args:
+        description: "Extra ctest arguments (e.g. -R foo, -E bar, -V)"
+        required: false
+        default: ""
+        type: string
 
 jobs:
-  # Linux builds.
-  #
-  # gcc sometimes warns (e.g. about potentially uninitialized variables) only
-  # when some optimizations are enabled. So we build Debug as well as Release
-  # on Linux. The Debug build also collects and uploads test coverage.
-  linux-debug:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Configure
-        run: CFLAGS='--coverage -Werror' cmake -DCMAKE_BUILD_TYPE=Debug -G 'Unix Makefiles' .
-      - name: Build
-        run: make VERBOSE=1
-      - name: Test
-        run: python3 ./scripts/run-tests.py
-      - name: Create coverage report
-        run: |
-          sudo apt-get install -y lcov
-          lcov --directory . --capture --branch-coverage --output-file coverage.info
-          lcov --list coverage.info --branch-coverage
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+  build:
+    name: >-
+      ${{ matrix.os }} · ${{ matrix.compiler }} · ${{ matrix.build_type }}
+      ${{ matrix.shared == 'OFF' && ' · static' || '' }}
+      ${{ matrix.asan == 'ON' && ' · ASAN' || '' }}
+    runs-on: ${{ matrix.os }}
 
-  linux-release:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Configure
-        run: CFLAGS='--coverage -Werror' cmake -DCMAKE_BUILD_TYPE=Release -G 'Unix Makefiles' .
-      - name: Build
-        run: make VERBOSE=1
-      - name: Test
-        run: python3 ./scripts/run-tests.py
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+            build_type: Debug
+            shared: "ON"
+            asan: "OFF"
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+            build_type: Release
+            shared: "ON"
+            asan: "OFF"
+          - os: ubuntu-latest
+            compiler: clang
+            cc: clang
+            cxx: clang++
+            build_type: Debug
+            shared: "ON"
+            asan: "ON"
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+            build_type: Release
+            shared: "OFF"
+            asan: "OFF"
 
-  # Windows builds.
-  #
-  # We do both 32 and 64-bit builds. Also note 32-bit does Debug build while
-  # 64-bit one does Release build. (Full matrix would likely be an overkill.)
-  windows-32-debug:
-    runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Dev command prompt
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x86
-      - name: Configure
-        run: cmake -DCMAKE_BUILD_TYPE=Debug -G "NMake Makefiles" .
-      - name: Build
-        run: nmake
-      - name: Test
-        run: python .\scripts\run-tests.py
+    - name: Git Sane LF
+      run: |
+        git config --global core.autocrlf false
+        git config --global core.eol lf
 
-  windows-64-release:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Dev command prompt
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-      - name: Configure
-        run: cmake -DCMAKE_BUILD_TYPE=Release -G "NMake Makefiles" .
-      - name: Build
-        run: nmake
-      - name: Test
-        run: python .\scripts\run-tests.py
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install CMake/Ninja
+      uses: lukka/get-cmake@latest
+
+    - name: Install dependencies (Ubuntu)
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install --no-install-recommends -y \
+          build-essential \
+          clang \
+          git \
+          libubsan1 \
+          ninja-build \
+          pkg-config \
+          python3 \
+          yq
+
+    - name: Build libfyaml
+      shell: bash
+      run: |
+        git clone --depth 1 https://github.com/pantoniou/libfyaml.git "${RUNNER_TEMP}/libfyaml"
+        cmake -S "${RUNNER_TEMP}/libfyaml" -B "${RUNNER_TEMP}/libfyaml-build" \
+          -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_TESTING=OFF \
+          -DENABLE_LIBCLANG=OFF \
+          -DENABLE_REFLECTION=OFF \
+          -DCMAKE_INSTALL_PREFIX="${RUNNER_TEMP}/fymd4c-deps"
+        cmake --build "${RUNNER_TEMP}/libfyaml-build"
+        cmake --install "${RUNNER_TEMP}/libfyaml-build"
+
+    - name: Add dependency tools to PATH
+      shell: bash
+      run: echo "${RUNNER_TEMP}/fymd4c-deps/bin" >> "${GITHUB_PATH}"
+
+    - name: Configure
+      shell: bash
+      run: |
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+          -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+          -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+          -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/fymd4c-deps" \
+          -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
+          -DENABLE_ASAN=${{ matrix.asan }} \
+          -DTS_GRAMMAR_SOURCE_MODE=archive
+
+    - name: Build
+      run: cmake --build build --config ${{ matrix.build_type }}
+
+    - name: Test
+      shell: bash
+      env:
+        LD_LIBRARY_PATH: ${{ runner.temp }}/fymd4c-deps/lib:${{ runner.temp }}/fymd4c-deps/lib64
+        DYLD_LIBRARY_PATH: ${{ runner.temp }}/fymd4c-deps/lib:${{ runner.temp }}/fymd4c-deps/lib64
+      working-directory: build
+      run: ctest -C ${{ matrix.build_type }} ${{ inputs.ctest_args }}
+
+    - name: Upload test logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs-${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ matrix.shared }}-${{ github.run_id }}
+        path: |
+          **/Testing/Temporary/
+          build/**/*.log
