@@ -29,6 +29,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "md4c-heal.h"
 
@@ -43,6 +44,10 @@
     #endif
 #endif
 
+#ifndef __has_builtin
+    #define __has_builtin(x) 0
+#endif
+
 
 /***************************
  ***  Growable buffer    ***
@@ -54,6 +59,27 @@ typedef struct {
     unsigned cap;
     int error;
 } HEAL_BUF;
+
+static inline int
+add_overflow_unsigned(unsigned a, unsigned b, unsigned* out)
+{
+#if __has_builtin(__builtin_add_overflow) || defined(__GNUC__)
+    return __builtin_add_overflow(a, b, out);
+#else
+    *out = a + b;
+    return *out < a;
+#endif
+}
+
+static inline unsigned
+add_sat_unsigned(unsigned a, unsigned b)
+{
+    unsigned out;
+
+    if(add_overflow_unsigned(a, b, &out))
+        return UINT_MAX;
+    return out;
+}
 
 static inline void
 buf_init(HEAL_BUF* buf, unsigned initial_cap)
@@ -67,9 +93,19 @@ buf_init(HEAL_BUF* buf, unsigned initial_cap)
 static inline void
 buf_append(HEAL_BUF* buf, const char* s, unsigned len)
 {
+    unsigned needed;
+
     if(len == 0 || buf->error) return;
-    if(buf->size + len > buf->cap) {
-        unsigned new_cap = buf->cap + buf->cap / 2 + len + 64;
+    if(add_overflow_unsigned(buf->size, len, &needed)) {
+        buf->error = 1;
+        return;
+    }
+    if(needed > buf->cap) {
+        unsigned new_cap = add_sat_unsigned(buf->cap, buf->cap / 2);
+        new_cap = add_sat_unsigned(new_cap, len);
+        new_cap = add_sat_unsigned(new_cap, 64);
+        if(new_cap < needed)
+            new_cap = needed;
         char* p = (char*) realloc(buf->data, new_cap);
         if(!p) { buf->error = 1; return; }
         buf->data = p;
