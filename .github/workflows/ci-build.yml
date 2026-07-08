@@ -70,6 +70,13 @@ jobs:
             build_type: Debug
             shared: "ON"
             asan: "OFF"
+          - os: macos-latest
+            compiler: clang
+            cc: clang
+            cxx: clang++
+            build_type: Debug
+            shared: "ON"
+            asan: "ON"
 
     steps:
     - name: Git Sane LF
@@ -157,7 +164,7 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: test-logs-${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ matrix.shared }}-${{ github.run_id }}
+        name: test-logs-${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.build_type }}-${{ matrix.shared }}-${{ matrix.asan }}-${{ github.run_id }}
         path: |
           **/Testing/Temporary/
           build/**/*.log
