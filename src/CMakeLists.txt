@@ -6,11 +6,22 @@ join_paths(PKGCONFIG_INCLUDEDIR "\${prefix}" "${CMAKE_INSTALL_INCLUDEDIR}")
 join_paths(PKGCONFIG_LIBDIR "\${prefix}" "${CMAKE_INSTALL_LIBDIR}")
 
 # libfyaml: the ANSI renderer's styling config (md4c-style) is parsed from YAML,
-# and the public header exposes a fy_generic styling option.
-find_path(LIBFYAML_INCLUDE_DIR NAMES libfyaml.h)
-find_library(LIBFYAML_LIBRARY NAMES fyaml)
-if(NOT LIBFYAML_INCLUDE_DIR OR NOT LIBFYAML_LIBRARY)
-    message(FATAL_ERROR "libfyaml not found (required by the ANSI renderer styling)")
+# and the public header exposes a fy_generic styling option. A parent project
+# may already provide libfyaml::libfyaml (its own find_package/FetchContent,
+# e.g. when libfymd4c is pulled in transitively via fyai); reuse that instead
+# of re-resolving the library, then try libfyaml's own CMake package config,
+# and only then fall back to a raw path lookup.
+if(NOT TARGET libfyaml::libfyaml)
+    find_package(libfyaml CONFIG QUIET)
+endif()
+if(TARGET libfyaml::libfyaml)
+    get_target_property(LIBFYAML_INCLUDE_DIR libfyaml::libfyaml INTERFACE_INCLUDE_DIRECTORIES)
+else()
+    find_path(LIBFYAML_INCLUDE_DIR NAMES libfyaml.h)
+    find_library(LIBFYAML_LIBRARY NAMES fyaml)
+    if(NOT LIBFYAML_INCLUDE_DIR OR NOT LIBFYAML_LIBRARY)
+        message(FATAL_ERROR "libfyaml not found (required by the ANSI renderer styling)")
+    endif()
 endif()
 
 # Embed the default styling YAML as a C byte array.
