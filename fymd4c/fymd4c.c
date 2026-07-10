@@ -76,6 +76,8 @@ static enum fymd_background forced_bg = FYMD_BG_AUTO;
 static enum fymd_sgr_input sgr_input = FYMD_SGR_STRIP;
 static int forced_reverse = 0;
 static const char* forced_language = NULL; /* NULL => Markdown; "auto" => path */
+static int fence_style = 1;
+static int fence_style_set = 0;
 
 /* HTML output. */
 /* Skip a leading UTF-8 BOM by default, matching the historical md2html. */
@@ -312,7 +314,7 @@ process_ansi_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live)
  * block, and line-diff it against the previously displayed viewport. */
 static int
 process_fenced_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live,
-                      const char* language)
+                      const char* language, unsigned block_flags)
 {
     struct membuffer input = {0}, accum = {0}, shown = {0};
     struct fymd_fenced_block_opts opts;
@@ -324,7 +326,7 @@ process_fenced_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live,
     membuf_init(&shown, 8192);
     memset(&opts, 0, sizeof(opts));
     opts.language = language;
-    opts.flags = FYMD_FBF_DEFAULT;
+    opts.flags = (enum fymd_fenced_block_flags) block_flags;
 
     while(off < input.size || first) {
         char* rendered = NULL;
@@ -418,7 +420,8 @@ process_file(const char* in_path, FILE* in, FILE* out, struct fymd_renderer* r)
     if(output_format == FORMAT_ANSI && want_stream) {
         int live = want_stream_progressive && fymd_isatty(fymd_fileno(out));
         if(forced_language != NULL)
-            ret = process_fenced_stream(in, out, r, live, language);
+            ret = process_fenced_stream(in, out, r, live, language,
+                    FYMD_FBF_HIGHLIGHT | (fence_style ? FYMD_FBF_STYLE : 0));
         else
             ret = process_ansi_stream(in, out, r, live);
         fymd_free(detected_language);
@@ -447,7 +450,8 @@ process_file(const char* in_path, FILE* in, FILE* out, struct fymd_renderer* r)
                 struct fymd_fenced_block_opts block;
                 memset(&block, 0, sizeof(block));
                 block.language = language;
-                block.flags = FYMD_FBF_DEFAULT;
+                block.flags = (enum fymd_fenced_block_flags)
+                    (FYMD_FBF_HIGHLIGHT | (fence_style ? FYMD_FBF_STYLE : 0));
                 ret = fymd_render_fenced_block(r, buf_in.data, buf_in.size,
                                                 &block, &o, &olen);
             } else {
@@ -504,6 +508,7 @@ enum {
     OPT_SGR,
     OPT_REVERSE,
     OPT_LANGUAGE,
+    OPT_FENCE_STYLE,
     OPT_STREAM,
     OPT_STREAM_PROGRESSIVE,
     OPT_MAX_ACTIVE_LINES,
@@ -564,6 +569,7 @@ static const struct option long_options[] = {
     { "sgr",                required_argument, NULL, OPT_SGR },
     { "reverse",            no_argument,       NULL, OPT_REVERSE },
     { "language",           required_argument, NULL, OPT_LANGUAGE },
+    { "fence-style",        required_argument, NULL, OPT_FENCE_STYLE },
     { "stream",             no_argument,       NULL, OPT_STREAM },
     { "stream-progressive", no_argument,       NULL, OPT_STREAM_PROGRESSIVE },
     { "max-active-lines",   required_argument, NULL, OPT_MAX_ACTIVE_LINES },
@@ -640,6 +646,7 @@ usage(void)
         "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
         "      --reverse        Render the whole document as a card (background filled to width)\n"
         "      --language=LANG  Render raw input as a fenced block; auto detects from FILE\n"
+        "      --fence-style=MODE  Fenced block decoration: on (default) or off\n"
         "      --stream         Render incrementally (push mode)\n"
         "      --stream-progressive  Live progressive render; updates the active region in place\n"
         "      --max-active-lines=N  Cap the streaming active region to N input lines (0 = unlimited)\n"
@@ -703,6 +710,18 @@ parse_args(int argc, char** argv)
                     exit(1);
                 }
                 forced_language = optarg;
+                break;
+            case OPT_FENCE_STYLE:
+                fence_style_set = 1;
+                if(strcmp(optarg, "on") == 0)
+                    fence_style = 1;
+                else if(strcmp(optarg, "off") == 0)
+                    fence_style = 0;
+                else {
+                    fprintf(stderr, "Invalid --fence-style value: %s "
+                            "(use on or off)\n", optarg);
+                    exit(1);
+                }
                 break;
             case OPT_STREAM:      want_stream = 1; break;
             case OPT_STREAM_PROGRESSIVE:
@@ -919,6 +938,10 @@ parse_args(int argc, char** argv)
 
     if(forced_language != NULL && output_format != FORMAT_ANSI) {
         fprintf(stderr, "--language is only valid with --format=ansi.\n");
+        exit(1);
+    }
+    if(fence_style_set && forced_language == NULL) {
+        fprintf(stderr, "--fence-style requires --language.\n");
         exit(1);
     }
 }

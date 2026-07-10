@@ -41,6 +41,23 @@ def main():
             failed += 1
             print("FAIL progressive language chunk=%d: %r" % (chunk, result.stdout))
 
+    bare = run(options.program, ["--language=text", "--fence-style=off"])
+    if bare.returncode == 0 and bare.stdout == SOURCE:
+        passed += 1
+    else:
+        failed += 1
+        print("FAIL undecorated language: %r %r" % (bare.stdout, bare.stderr))
+    for chunk in (1, 5, 128):
+        result = run(options.program,
+                     ["--language=text", "--fence-style=off",
+                      "--stream-progressive", "--stream-chunk=%d" % chunk])
+        if result.returncode == 0 and result.stdout == SOURCE:
+            passed += 1
+        else:
+            failed += 1
+            print("FAIL progressive undecorated chunk=%d: %r" %
+                  (chunk, result.stdout))
+
     limited = run(options.program,
                   ["--language=text", "--stream-progressive", "--stream-chunk=2",
                    "--max-lines=3", "--line-overflow=scroll"])
@@ -72,6 +89,13 @@ def main():
     else:
         failed += 1
         print("FAIL --language accepted for HTML")
+
+    invalid = run(options.program, ["--fence-style=off"])
+    if invalid.returncode != 0:
+        passed += 1
+    else:
+        failed += 1
+        print("FAIL --fence-style accepted without --language")
 
     print("%d passed, %d failed" % (passed, failed))
     return 1 if failed else 0

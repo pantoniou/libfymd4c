@@ -124,6 +124,9 @@ API; `--language=auto` detects the language from the input filename through the
 same libfyts catalogue. It supports one-shot and progressive streaming modes,
 including rendered-row limits. With stdin or an unknown extension, automatic
 detection produces an unlabeled, unhighlighted fence.
+`--fence-style=off` suppresses the header, footer, content inset and plain-code
+theme styling while leaving syntax highlighting enabled; it applies equally to
+one-shot and progressive language rendering.
 
 ### Config flags (`FYMD_RF_*`)
 

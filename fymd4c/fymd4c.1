@@ -75,6 +75,10 @@ Render fenced code blocks in reverse "bubble" style.
 Treat the input as raw source code and render it directly as one fenced block instead of parsing Markdown. \fBauto\fR detects the language from the input file name using the libfyts catalogue. With standard input, \fBauto\fR renders an unlabeled plain-code fence. This mode also works with \fB--stream-progressive\fR.
 .
 .TP
+.B --fence-style= \fIMODE\fR
+Control raw fenced-block decoration for \fB--language\fR: \fBon\fR (default) emits the header, footer, code inset, and theme styling; \fBoff\fR emits code content without those decorations. Syntax highlighting remains enabled. Both modes support progressive rendering.
+.
+.TP
 .B --table-size= \fIMODE\fR
 Table sizing: fit to content or to width.
 .
