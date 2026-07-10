@@ -1,0 +1,6 @@
+# Borderless approximation supported by the current three-glyph table model.
+# Layout and cell padding are retained; only the visible grid is suppressed.
+glyphs:
+  table_vertical: " "
+  table_horizontal: " "
+  table_cross: " "

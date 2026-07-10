@@ -330,6 +330,9 @@ default (`stylings/md4c-default.yaml`, embedded at build time) reproduces the
 historical hardcoded look; `--style=FILE` (CLI) or `md_ansi_style_*` (library)
 overrides any subset.
 
+Focused partial themes for ASCII, heavy Unicode, colored-header, and visually
+borderless tables are available under `stylings/examples/`.
+
 ```c
 typedef struct { MD_STYLE_BG background; int reverse; } MD_ANSI_STYLE_OPTS;
 MD_ANSI_STYLE* md_ansi_style_create(const char* yaml, size_t len,

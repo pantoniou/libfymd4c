@@ -1,0 +1,5 @@
+# Classic ASCII table grid. Unspecified theme values keep renderer defaults.
+glyphs:
+  table_vertical: "|"
+  table_horizontal: "-"
+  table_cross: "+"

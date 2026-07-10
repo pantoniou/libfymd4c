@@ -205,6 +205,13 @@ if (BUILD_FYMD4C_EXECUTABLE)
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test"
             COMMAND ${PYTHON3_EXECUTABLE} fenced-cli-test.py -p "$<TARGET_FILE:fymd4c-cli>")
 
+        add_test(
+            NAME style-examples
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test"
+            COMMAND ${PYTHON3_EXECUTABLE} style-examples-test.py
+                    -p "$<TARGET_FILE:fymd4c-cli>"
+                    -s "${CMAKE_CURRENT_SOURCE_DIR}/stylings/examples")
+
         # CommonMark (+ extension) conformance suites. Each spec file holds a
         # sequence of numbered examples; register every example as its own ctest
         # (driven through `fymd4c -t html`) so `ctest -j` runs them in parallel,

@@ -1,0 +1,5 @@
+# Heavy Unicode table grid.
+glyphs:
+  table_vertical: "┃"
+  table_horizontal: "━"
+  table_cross: "╋"

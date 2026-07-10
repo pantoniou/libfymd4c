@@ -1,0 +1,9 @@
+# Bold white text on a blue background for table headings.
+styles:
+  table-heading: "\e[1;37;44m"
+  table-heading-off: "\e[0m"
+
+elements:
+  table_header:
+    on: table-heading
+    off: table-heading-off
