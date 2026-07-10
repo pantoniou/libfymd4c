@@ -448,6 +448,19 @@ fymd_renderer_get_cfg(struct fymd_renderer *r)
     return r ? &r->cfg : NULL;
 }
 
+int
+fymd_renderer_get_reverse_pair(struct fymd_renderer *r,
+                               const char **on, const char **off)
+{
+    if(r == NULL || r->style == NULL)
+        return -1;
+    if(on != NULL)
+        *on = r->style->reverse.on;
+    if(off != NULL)
+        *off = r->style->reverse.off;
+    return 0;
+}
+
 size_t
 fymd_theme_count(void)
 {

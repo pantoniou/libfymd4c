@@ -181,6 +181,11 @@ const char *fymd_theme_name(size_t index) FYMD_EXPORT;
  * inline/file style and is rejected after progressive streaming has begun. */
 int fymd_renderer_set_theme(struct fymd_renderer *r, const char *name) FYMD_EXPORT;
 
+/* The active theme's resolved reverse-card escape pair.
+ * Returns 0 on success, -1 if r or its *style is NULL */
+int fymd_renderer_get_reverse_pair(struct fymd_renderer *r,
+                                   const char **on, const char **off) FYMD_EXPORT;
+
 /* Configure a rendered-row viewport. The options and format string are copied.
  * Pass NULL, FYMD_LLM_NONE, or max_lines == 0 to disable it. This cannot be
  * changed while a progressive stream exists; call fymd_render_reset() first.
