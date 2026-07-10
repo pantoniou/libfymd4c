@@ -360,9 +360,11 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     r->cfg = *cfg;
     r->cfg.style = fymd_strdup(cfg->style);
     r->cfg.style_path = fymd_strdup(cfg->style_path);
+    r->cfg.theme = fymd_strdup(cfg->theme);
     r->cfg.code_theme = fymd_strdup(cfg->code_theme);
     if((cfg->style && !r->cfg.style) ||
        (cfg->style_path && !r->cfg.style_path) ||
+       (cfg->theme && !r->cfg.theme) ||
        (cfg->code_theme && !r->cfg.code_theme))
         goto err;
 
@@ -375,6 +377,8 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
         r->style = md_ansi_style_create_from_generic(cfg->style_generic, &sopts);
     else if(r->cfg.style_path != NULL)
         r->style = md_ansi_style_create_from_file(r->cfg.style_path, &sopts);
+    else if(r->cfg.style == NULL && r->cfg.theme != NULL)
+        r->style = md_ansi_style_create_named(r->cfg.theme, &sopts);
     else
         r->style = md_ansi_style_create(r->cfg.style,
                                         r->cfg.style ? strlen(r->cfg.style) : 0,
@@ -429,6 +433,7 @@ fymd_renderer_destroy(struct fymd_renderer *r)
         md_ansi_style_destroy(r->style);
     free((void *) r->cfg.style);
     free((void *) r->cfg.style_path);
+    free((void *) r->cfg.theme);
     free((void *) r->cfg.code_theme);
     free(r->limit_separator);
     fymd_buf_fini(&r->screen);
@@ -441,6 +446,62 @@ const struct fymd_renderer_cfg *
 fymd_renderer_get_cfg(struct fymd_renderer *r)
 {
     return r ? &r->cfg : NULL;
+}
+
+size_t
+fymd_theme_count(void)
+{
+    return 1 + 2 * md_ansi_theme_count();
+}
+
+const char *
+fymd_theme_name(size_t index)
+{
+    size_t theme_index;
+
+    if(index == 0)
+        return "default";
+    theme_index = (index - 1) / 2;
+    return md_ansi_theme_name(theme_index, (index - 1) % 2);
+}
+
+int
+fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
+{
+    MD_ANSI_STYLE_OPTS sopts;
+    MD_ANSI_STYLE *style;
+    char *theme;
+
+    if(r == NULL || r->stream != NULL)
+        return -1;
+    if(name == NULL || name[0] == '\0')
+        name = "default";
+    theme = fymd_strdup(name);
+    if(theme == NULL)
+        return -1;
+    memset(&sopts, 0, sizeof(sopts));
+    sopts.background = map_background(r->cfg.background);
+    sopts.reverse = -1;
+    style = md_ansi_style_create_named(name, &sopts);
+    if(style == NULL) {
+        free(theme);
+        return -1;
+    }
+    if(r->cfg.flags & FYMD_RF_NO_CODE_HL)
+        style->code_enabled = 0;
+    if(r->cfg.code_theme != NULL) {
+        style->code_theme = r->cfg.code_theme;
+        style->code_enabled = (r->cfg.flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;
+    }
+    md_ansi_style_destroy(r->style);
+    r->style = style;
+    free((void *)r->cfg.style);
+    free((void *)r->cfg.style_path);
+    free((void *)r->cfg.theme);
+    r->cfg.style = NULL;
+    r->cfg.style_path = NULL;
+    r->cfg.theme = theme;
+    return 0;
 }
 
 int
@@ -548,6 +609,7 @@ fymd_render_fenced_block(struct fymd_renderer *r,
 {
     struct fymd_fenced_block_opts defaults;
     struct fymd_buf b, limited;
+    size_t lines, plain_lines, hidden_lines;
     unsigned ff = 0;
     int rc;
 
@@ -565,9 +627,21 @@ fymd_render_fenced_block(struct fymd_renderer *r,
     if(opts->flags & FYMD_FBF_HIGHLIGHT)
         ff |= MD_ANSI_FENCE_HIGHLIGHT;
 
+    plain_lines = fymd_count_rows(text, len);
+    lines = plain_lines;
+    if(opts->flags & FYMD_FBF_STYLE) {
+        if(r->style->code_header != NULL && r->style->code_header[0] != '\0')
+            lines++;
+        if(r->style->code_footer != NULL && r->style->code_footer[0] != '\0')
+            lines++;
+    }
+    hidden_lines = r->limit.mode != FYMD_LLM_NONE && r->limit.max_lines > 0 &&
+                   lines > r->limit.max_lines ? lines - r->limit.max_lines : 0;
+
     memset(&b, 0, sizeof(b));
     rc = md_ansi_fenced_styled(text, (MD_SIZE) len, opts->language,
-                                opts->template_vars, ff,
+                                opts->template_vars, lines, plain_lines,
+                                hidden_lines, ff,
                                 fymd_buf_append, &b, r->renderer_flags,
                                 r->width, r->style);
     if(rc != 0 || b.oom) {

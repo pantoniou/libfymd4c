@@ -37,6 +37,14 @@ main(void)
     r = fymd_renderer_create(&cfg);
     if(r == NULL)
         return 1;
+    if(fymd_theme_count() != 9 ||
+       strcmp(fymd_theme_name(0), "default") != 0 ||
+       strcmp(fymd_theme_name(8), "tokyonight-borderless") != 0 ||
+       fymd_theme_name(9) != NULL ||
+       fymd_renderer_set_theme(r, "catppuccin") != 0 ||
+       strcmp(fymd_renderer_get_cfg(r)->theme, "catppuccin") != 0 ||
+       fymd_renderer_set_theme(r, "not-a-theme") == 0)
+        failed = 1;
 
     memset(&opts, 0, sizeof(opts));
     if(fymd_render_fenced_block(r, input, sizeof(input) - 1, &opts,
@@ -108,6 +116,40 @@ main(void)
            strcmp(templated, "  Hello world! c\n  x\n") != 0)
             failed = 1;
         fymd_free(templated);
+        fymd_renderer_destroy(themed);
+    }
+
+    /* Renderer-owned template counters include decoration and row limiting. */
+    {
+        static const char theme[] =
+            "code:\n  decoration:\n"
+            "    header: ''\n"
+            "    footer: '{lines}/{plain-lines}/{hidden-lines}'\n"
+            "    prefix: ''\n";
+        struct fymd_renderer_cfg themed_cfg;
+        struct fymd_renderer *themed;
+        char *counted = NULL;
+        size_t counted_len = 0;
+
+        memset(&themed_cfg, 0, sizeof(themed_cfg));
+        themed_cfg.flags = FYMD_RF_NO_COLOR;
+        themed_cfg.width = 40;
+        themed_cfg.style = theme;
+        themed = fymd_renderer_create(&themed_cfg);
+        memset(&limit, 0, sizeof(limit));
+        limit.mode = FYMD_LLM_SCROLL;
+        limit.max_lines = 1;
+        memset(&opts, 0, sizeof(opts));
+        opts.flags = FYMD_FBF_STYLE;
+        if(themed == NULL || fymd_renderer_set_line_limit(themed, &limit) != 0 ||
+           fymd_render_fenced_block(themed, "one\ntwo\n", 8, &opts,
+                                    &counted, &counted_len) != 0 ||
+           strcmp(counted, "  3/2/2\n") != 0) {
+            fprintf(stderr, "counter template output: %s\n",
+                    counted != NULL ? counted : "<null>");
+            failed = 1;
+        }
+        fymd_free(counted);
         fymd_renderer_destroy(themed);
     }
 

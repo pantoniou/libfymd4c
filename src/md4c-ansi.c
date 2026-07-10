@@ -164,6 +164,9 @@ struct MD_ANSI_tag {
     int table_width;        /* >0 fixed, 0 = unlimited, <0 = auto-detect */
     const MD_ANSI_STYLE* style;  /* element styling (never NULL during render) */
     fy_generic template_vars;    /* borrowed raw-fence {key} values */
+    size_t template_lines;
+    size_t template_plain_lines;
+    size_t template_hidden_lines;
 
     /* Prose word-wrap: content of the current logical line is collected into
      * lbuf (after its indent prefix), then wrapped to wrap_cols on newline. */
@@ -1534,6 +1537,7 @@ build_code_rule_text(const char* gl_horiz, const char* lang, MD_SIZE lang_size,
 static fy_generic
 build_code_template_map(const MD_ANSI_STYLE* style, fy_generic vars,
                         const char* lang, MD_SIZE lang_size, int cols,
+                        size_t lines, size_t plain_lines, size_t hidden_lines,
                         struct fy_generic_builder** gbp)
 {
     fy_generic map, base, renderer_values;
@@ -1542,8 +1546,12 @@ build_code_template_map(const MD_ANSI_STYLE* style, fy_generic vars,
     char* fill = NULL;
     size_t hlen = strlen(style->table_horizontal), fill_len;
     struct fy_generic_builder* gb;
+    char lines_text[32], plain_lines_text[32], hidden_lines_text[32];
 
     *gbp = NULL;
+    snprintf(lines_text, sizeof(lines_text), "%zu", lines);
+    snprintf(plain_lines_text, sizeof(plain_lines_text), "%zu", plain_lines);
+    snprintf(hidden_lines_text, sizeof(hidden_lines_text), "%zu", hidden_lines);
     language_value.data = lang != NULL ? lang : "";
     language_value.size = lang != NULL ? lang_size : 0;
     fill_value.data = "";
@@ -1564,7 +1572,10 @@ build_code_template_map(const MD_ANSI_STYLE* style, fy_generic vars,
             "language", lang != NULL ? fy_value(language_value) : fy_null,
             "rule", style->table_horizontal != NULL
                         ? fy_value(style->table_horizontal) : fy_null,
-            "fill", fill != NULL ? fy_value(fill_value) : fy_null);
+            "fill", fill != NULL ? fy_value(fill_value) : fy_null,
+            "lines", fy_value(lines_text),
+            "plain-lines", fy_value(plain_lines_text),
+            "hidden-lines", fy_value(hidden_lines_text));
     base = fy_generic_is_mapping(vars) ? vars : fy_map_empty;
     map = fy_merge(gb, base, renderer_values);
     if(fy_generic_is_valid(map))
@@ -1580,6 +1591,7 @@ static size_t
 build_code_decoration_text(const MD_ANSI_STYLE* style, fy_generic vars,
                            const char* tmpl,
                            const char* lang, MD_SIZE lang_size, int cols,
+                           size_t lines, size_t plain_lines, size_t hidden_lines,
                            char* buf, size_t bufsz)
 {
     size_t i = 0, n = 0;
@@ -1594,7 +1606,8 @@ build_code_decoration_text(const MD_ANSI_STYLE* style, fy_generic vars,
     if(strcmp(tmpl, "default") == 0)
         return build_code_rule_text(style->table_horizontal, lang, lang_size,
                                     cols, buf, bufsz);
-    context = build_code_template_map(style, vars, lang, lang_size, cols, &gb);
+    context = build_code_template_map(style, vars, lang, lang_size, cols,
+                                      lines, plain_lines, hidden_lines, &gb);
     if(!fy_generic_is_valid(context))
         return 0;
 #define APPEND(p, len) do { size_t _l = (len); if(n + _l <= bufsz) { \
@@ -1640,7 +1653,10 @@ render_code_rule(MD_ANSI* r, const char* lang, MD_SIZE lang_size)
 
     n = build_code_decoration_text(r->style, r->template_vars,
                                    tmpl, lang, lang_size,
-                                   avail, buf, sizeof(buf));
+                                   avail, r->template_lines,
+                                   r->template_plain_lines,
+                                   r->template_hidden_lines,
+                                   buf, sizeof(buf));
     render_ansi(r, r->style->rule.on);
     render_verbatim(r, buf, (MD_SIZE) n);
     render_ansi(r, r->style->rule.off);
@@ -1791,10 +1807,16 @@ emit_highlighted_code(MD_ANSI* r, int styled)
         hn = build_code_decoration_text(r->style, r->template_vars,
                                         r->style->code_header,
                                         r->code_lang, r->code_lang_size,
-                                        avail, header, sizeof(header) - 1);
+                                        avail, r->template_lines,
+                                        r->template_plain_lines,
+                                        r->template_hidden_lines,
+                                        header, sizeof(header) - 1);
         fn = build_code_decoration_text(r->style, r->template_vars,
                                         r->style->code_footer,
-                                        NULL, 0, avail, footer, sizeof(footer) - 1);
+                                        NULL, 0, avail, r->template_lines,
+                                        r->template_plain_lines,
+                                        r->template_hidden_lines,
+                                        footer, sizeof(footer) - 1);
         header[hn] = '\0';
         footer[fn] = '\0';
         cfg.prolog = header;
@@ -2530,6 +2552,7 @@ emit_raw_code(MD_ANSI* r, int styled)
 int
 md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
                        const char* language, fy_generic template_vars,
+                       size_t lines, size_t plain_lines, size_t hidden_lines,
                        unsigned fence_flags,
                        void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
                        void* userdata, unsigned renderer_flags, int width,
@@ -2566,6 +2589,9 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
     }
     render.style = style;
     render.template_vars = template_vars;
+    render.template_lines = lines;
+    render.template_plain_lines = plain_lines;
+    render.template_hidden_lines = hidden_lines;
     if((renderer_flags & MD_ANSI_FLAG_REVERSE) &&
        !(renderer_flags & MD_ANSI_FLAG_NO_COLOR) &&
        style->reverse.on != NULL && style->reverse.on[0] != '\0')

@@ -126,6 +126,8 @@ extern "C"
      * HIGHLIGHT requests libfyts highlighting when language is supported. */
     int md_ansi_fenced_styled(const MD_CHAR *input, MD_SIZE input_size,
                               const char *language, fy_generic template_vars,
+                              size_t lines, size_t plain_lines,
+                              size_t hidden_lines,
                               unsigned fence_flags,
                               void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
                               void *userdata, unsigned renderer_flags, int width,

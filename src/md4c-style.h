@@ -84,6 +84,13 @@ typedef struct MD_ANSI_STYLE_OPTS {
 MD_ANSI_STYLE* md_ansi_style_create(const char* yaml, size_t yaml_len,
                                     const MD_ANSI_STYLE_OPTS* opts);
 
+/* Build one of the embedded named themes. NULL/empty selects the default;
+ * unknown names return NULL. */
+MD_ANSI_STYLE* md_ansi_style_create_named(const char* name,
+                                          const MD_ANSI_STYLE_OPTS* opts);
+size_t md_ansi_theme_count(void);
+const char* md_ansi_theme_name(size_t index, int borderless);
+
 /* Build a style from a YAML file (NULL path => built-in default config). */
 MD_ANSI_STYLE* md_ansi_style_create_from_file(const char* path,
                                               const MD_ANSI_STYLE_OPTS* opts);

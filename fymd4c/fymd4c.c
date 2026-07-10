@@ -72,6 +72,7 @@ static size_t line_head = 0;
 static const char* line_separator = NULL;
 static int table_fit_content = 0;
 static const char* style_path = NULL;
+static const char* theme_name = NULL;
 static enum fymd_background forced_bg = FYMD_BG_AUTO;
 static enum fymd_sgr_input sgr_input = FYMD_SGR_STRIP;
 static int forced_reverse = 0;
@@ -504,6 +505,7 @@ enum {
     OPT_WIDTH,
     OPT_TABLE_SIZE,
     OPT_STYLE,
+    OPT_THEME,
     OPT_BACKGROUND,
     OPT_SGR,
     OPT_REVERSE,
@@ -565,6 +567,7 @@ static const struct option long_options[] = {
     { "width",              required_argument, NULL, OPT_WIDTH },
     { "table-size",         required_argument, NULL, OPT_TABLE_SIZE },
     { "style",              required_argument, NULL, OPT_STYLE },
+    { "theme",              required_argument, NULL, OPT_THEME },
     { "background",         required_argument, NULL, OPT_BACKGROUND },
     { "sgr",                required_argument, NULL, OPT_SGR },
     { "reverse",            no_argument,       NULL, OPT_REVERSE },
@@ -642,6 +645,7 @@ usage(void)
         "      --width=WIDTH    Table width: auto (default), inf, or a column count\n"
         "      --table-size=MODE  Table sizing: fill width (default) or fit to content\n"
         "      --style=FILE     YAML styling config (overrides the built-in default)\n"
+        "      --theme=NAME     Embedded theme (append -borderless for grid-free tables)\n"
         "      --background=MODE  Background for light/dark styles: auto (default), dark, light\n"
         "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
         "      --reverse        Render the whole document as a card (background filled to width)\n"
@@ -727,6 +731,7 @@ parse_args(int argc, char** argv)
             case OPT_STREAM_PROGRESSIVE:
                 want_stream = 1; want_stream_progressive = 1; break;
             case OPT_STYLE:       style_path = optarg; break;
+            case OPT_THEME:       theme_name = optarg; break;
             case OPT_HTML_TITLE:  html_title = optarg; break;
             case OPT_HTML_CSS:    css_path = optarg; break;
 
@@ -986,6 +991,7 @@ main(int argc, char** argv)
      * rich set only when no explicit dialect flag was given. */
     memset(&cfg, 0, sizeof(cfg));
     cfg.style_path = style_path;
+    cfg.theme = theme_name;
     cfg.width = ansi_width;
     cfg.max_active_lines = max_active_lines;
     cfg.parser_flags = parser_flags ? parser_flags : FYMD_ANSI_DEFAULT_PARSER_FLAGS;
@@ -998,8 +1004,9 @@ main(int argc, char** argv)
 
     r = fymd_renderer_create(&cfg);
     if(r == NULL) {
-        fprintf(stderr, "Cannot create renderer (styling%s%s).\n",
-                style_path ? " from " : "", style_path ? style_path : "");
+        fprintf(stderr, "Cannot create renderer (style %s).\n",
+                style_path != NULL ? style_path :
+                (theme_name != NULL ? theme_name : "default"));
         exit(1);
     }
 

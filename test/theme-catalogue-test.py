@@ -13,7 +13,7 @@ ANSI = re.compile(br"\033\[[0-9;]*m")
 
 def render(program, theme, markdown, background, progressive=False):
     command = [program, "--color=on", "--width=72",
-               "--background=" + background, "--style=" + theme]
+               "--background=" + background, "--theme=" + theme]
     if progressive:
         command.extend(("--stream-progressive", "--stream-chunk=7"))
     command.append(markdown)
@@ -36,11 +36,10 @@ def main():
     failed = checks = 0
 
     for name, heading in themes.items():
-        theme = os.path.join(opts.styles, name + ".yaml")
         for background in ("dark", "light"):
             checks += 1
-            normal = render(opts.program, theme, markdown, background)
-            progressive = render(opts.program, theme, markdown, background, True)
+            normal = render(opts.program, name, markdown, background)
+            progressive = render(opts.program, name, markdown, background, True)
             expected = heading if background == "dark" else b"\033["
             leaked = b"default-fg" in normal.stdout or b"reset" in normal.stdout
             same_text = ANSI.sub(b"", normal.stdout) == ANSI.sub(b"", progressive.stdout)
@@ -50,10 +49,18 @@ def main():
                 print("FAIL %s/%s: %r %r" %
                       (name, background, normal.stderr, progressive.stderr))
 
+        checks += 1
+        table_markdown = os.path.join(opts.styles, "..", "examples", "table-basic.md")
+        borderless = render(opts.program, name + "-borderless", table_markdown, "dark")
+        if (borderless.returncode != 0 or
+                any(glyph in borderless.stdout for glyph in
+                    ("│".encode(), "─".encode(), "┼".encode()))):
+            failed += 1
+            print("FAIL %s-borderless: %r" % (name, borderless.stderr))
+
     print("%d passed, %d failed" % (checks - failed, failed))
     return 1 if failed else 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

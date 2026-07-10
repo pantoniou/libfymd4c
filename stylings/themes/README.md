@@ -6,11 +6,11 @@ table styling.
 
 ```sh
 ./fymd4c/fymd4c --color=on \
-  --style ../stylings/themes/catppuccin.yaml \
+  --theme=catppuccin \
   ../stylings/themes/showcase.md
 ```
 
 Available themes are `catppuccin`, `kanagawa`, `solarized`, and `tokyonight`.
+Append `-borderless` to any name for the same palette with grid-free tables.
 Select a variant explicitly with `--background=dark` or `--background=light`;
 the default `auto` mode follows the normal background detection.
-

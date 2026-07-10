@@ -13,6 +13,13 @@
 
 #include "md4c-style.h"
 
+struct md4c_embedded_theme {
+    const char* name;
+    const char* borderless_name;
+    const unsigned char* yaml;
+    size_t yaml_len;
+};
+
 #include "md4c_default_style.inc"   /* MD4C_DEFAULT_STYLE[], MD4C_DEFAULT_STYLE_LEN */
 
 /* ---- owned-string registry: every resolved string is strdup'd here so the
@@ -232,6 +239,60 @@ md_ansi_style_create(const char* yaml, size_t yaml_len, const MD_ANSI_STYLE_OPTS
 
     fy_generic_builder_destroy(gb);
     return s;
+}
+
+MD_ANSI_STYLE*
+md_ansi_style_create_named(const char* name, const MD_ANSI_STYLE_OPTS* opts)
+{
+    static const char suffix[] = "-borderless";
+    const unsigned char* yaml;
+    size_t yaml_len;
+    size_t name_len, suffix_len;
+    char base[32];
+    MD_ANSI_STYLE* style;
+    size_t i;
+
+    if(name == NULL || name[0] == '\0' || strcmp(name, "default") == 0)
+        return md_ansi_style_create(NULL, 0, opts);
+    name_len = strlen(name);
+    suffix_len = sizeof(suffix) - 1;
+    if(name_len > suffix_len && name_len - suffix_len < sizeof(base) &&
+       strcmp(name + name_len - suffix_len, suffix) == 0) {
+        memcpy(base, name, name_len - suffix_len);
+        base[name_len - suffix_len] = '\0';
+        style = md_ansi_style_create_named(base, opts);
+        if(style != NULL && strcmp(base, "default") != 0)
+            style->table_border_none = 1;
+        else if(style != NULL) {
+            md_ansi_style_destroy(style);
+            style = NULL;
+        }
+        return style;
+    }
+    for(i = 0; i < MD4C_THEME_COUNT; i++) {
+        if(strcmp(name, MD4C_THEMES[i].name) == 0)
+            break;
+    }
+    if(i == MD4C_THEME_COUNT)
+        return NULL;
+    yaml = MD4C_THEMES[i].yaml;
+    yaml_len = MD4C_THEMES[i].yaml_len;
+    return md_ansi_style_create((const char*)yaml, yaml_len, opts);
+}
+
+size_t
+md_ansi_theme_count(void)
+{
+    return MD4C_THEME_COUNT;
+}
+
+const char*
+md_ansi_theme_name(size_t index, int borderless)
+{
+    if(index >= MD4C_THEME_COUNT)
+        return NULL;
+    return borderless ? MD4C_THEMES[index].borderless_name
+                      : MD4C_THEMES[index].name;
 }
 
 MD_ANSI_STYLE*

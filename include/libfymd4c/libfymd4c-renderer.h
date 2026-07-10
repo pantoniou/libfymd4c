@@ -96,12 +96,12 @@ enum fymd_sgr_input {
  * defaults. String fields are copied; the caller need not keep them alive. */
 struct fymd_renderer_cfg {
     /* Styling source, highest precedence first. style_generic wins over
-     * style_path, which wins over style; if none is set the built-in default
-     * theme is used. */
+     * style_path, which wins over style, which wins over theme. */
     fy_generic style_generic;   /* a parsed libfyaml mapping (config schema), or
                                    leave zero-initialized / fy_invalid to skip */
     const char *style;          /* inline YAML config, NUL-terminated, or NULL */
     const char *style_path;     /* YAML config file path (overrides `style`) */
+    const char *theme;          /* embedded theme name, or NULL for default */
     enum fymd_cfg_flags flags;  /* FYMD_RF_* bitmask */
     int width;                  /* FYMD_WIDTH_AUTO / FYMD_WIDTH_INF / columns */
     int max_active_lines;       /* >0: cap the progressive active region (rows) */
@@ -144,7 +144,9 @@ enum fymd_fenced_block_flags {
 struct fymd_fenced_block_opts {
     const char *language;              /* NUL-terminated; NULL/empty => plain */
     enum fymd_fenced_block_flags flags;
-    fy_generic template_vars;          /* borrowed {key} substitution mapping */
+    fy_generic template_vars;          /* borrowed {key} substitution mapping;
+                                        * renderer also supplies {lines},
+                                        * {plain-lines}, and {hidden-lines} */
 };
 
 /* Progressive line-diff update produced by fymd_render_push().
@@ -170,6 +172,14 @@ void fymd_renderer_destroy(struct fymd_renderer *r) FYMD_EXPORT;
 /* The configuration the renderer was created with (string fields are the
  * renderer's owned copies). Returns NULL if r is NULL. */
 const struct fymd_renderer_cfg *fymd_renderer_get_cfg(struct fymd_renderer *r) FYMD_EXPORT;
+
+/* Embedded theme catalogue. Names are static strings owned by the library. */
+size_t fymd_theme_count(void) FYMD_EXPORT;
+const char *fymd_theme_name(size_t index) FYMD_EXPORT;
+
+/* Select an embedded theme. NULL/empty selects "default". This replaces any
+ * inline/file style and is rejected after progressive streaming has begun. */
+int fymd_renderer_set_theme(struct fymd_renderer *r, const char *name) FYMD_EXPORT;
 
 /* Configure a rendered-row viewport. The options and format string are copied.
  * Pass NULL, FYMD_LLM_NONE, or max_lines == 0 to disable it. This cannot be

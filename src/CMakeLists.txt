@@ -35,6 +35,24 @@ file(WRITE "${_md4c_style_inc}"
     "/* Generated from stylings/md4c-default.yaml. */\n"
     "static const unsigned char MD4C_DEFAULT_STYLE[] = {${_md4c_style_bytes}};\n"
     "static const size_t MD4C_DEFAULT_STYLE_LEN = sizeof(MD4C_DEFAULT_STYLE);\n")
+file(GLOB _md4c_theme_yamls CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../stylings/themes/*.yaml")
+set(_md4c_theme_catalog "")
+foreach(_theme_yaml IN LISTS _md4c_theme_yamls)
+    get_filename_component(_theme "${_theme_yaml}" NAME_WE)
+    file(READ "${_theme_yaml}" _theme_hex HEX)
+    string(REGEX REPLACE "(..)" "0x\\1," _theme_bytes "${_theme_hex}")
+    string(TOUPPER "${_theme}" _theme_upper)
+    file(APPEND "${_md4c_style_inc}"
+        "/* Generated from stylings/themes/${_theme}.yaml. */\n"
+        "static const unsigned char MD4C_THEME_${_theme_upper}[] = {${_theme_bytes}};\n"
+        "static const size_t MD4C_THEME_${_theme_upper}_LEN = sizeof(MD4C_THEME_${_theme_upper});\n")
+    string(APPEND _md4c_theme_catalog
+        "    {\"${_theme}\", \"${_theme}-borderless\", MD4C_THEME_${_theme_upper}, MD4C_THEME_${_theme_upper}_LEN},\n")
+endforeach()
+file(APPEND "${_md4c_style_inc}"
+    "static const struct md4c_embedded_theme MD4C_THEMES[] = {\n${_md4c_theme_catalog}};\n"
+    "static const size_t MD4C_THEME_COUNT = sizeof(MD4C_THEMES) / sizeof(MD4C_THEMES[0]);\n")
 
 # The shipped library: libfymd4c. Everything (md4c parser + entity table, HTML
 # renderer, heal utility, ANSI renderer, styling and streaming front-end) is
