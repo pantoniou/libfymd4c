@@ -52,6 +52,8 @@ struct fymd_renderer {
     size_t stream_active_rows;      /* mutable rows in the underlying stream */
 };
 
+static int fymd_buf_finish(struct fymd_buf *b, char **out, size_t *out_len);
+
 static void
 fymd_buf_append(const MD_CHAR *text, MD_SIZE size, void *userdata)
 {
@@ -536,6 +538,52 @@ fymd_render_to_string(struct fymd_renderer *r, const char *md, size_t len)
     if(fymd_render(r, md, len, &out, NULL) != 0)
         return NULL;
     return out;
+}
+
+int
+fymd_render_fenced_block(struct fymd_renderer *r,
+        const char *text, size_t len,
+        const struct fymd_fenced_block_opts *opts,
+        char **out, size_t *out_len)
+{
+    struct fymd_fenced_block_opts defaults;
+    struct fymd_buf b, limited;
+    unsigned ff = 0;
+    int rc;
+
+    if(r == NULL || out == NULL || (text == NULL && len > 0))
+        return -1;
+    if(opts == NULL) {
+        memset(&defaults, 0, sizeof(defaults));
+        defaults.flags = FYMD_FBF_DEFAULT;
+        opts = &defaults;
+    }
+    if(opts->flags & ~(unsigned)FYMD_FBF_DEFAULT)
+        return -1;
+    if(opts->flags & FYMD_FBF_STYLE)
+        ff |= MD_ANSI_FENCE_STYLE;
+    if(opts->flags & FYMD_FBF_HIGHLIGHT)
+        ff |= MD_ANSI_FENCE_HIGHLIGHT;
+
+    memset(&b, 0, sizeof(b));
+    rc = md_ansi_fenced_styled(text, (MD_SIZE) len, opts->language, ff,
+                                fymd_buf_append, &b, r->renderer_flags,
+                                r->width, r->style);
+    if(rc != 0 || b.oom) {
+        free(b.data);
+        return -1;
+    }
+    if(r->limit.mode != FYMD_LLM_NONE && r->limit.max_lines > 0) {
+        memset(&limited, 0, sizeof(limited));
+        if(fymd_project(r, b.data, b.size, &limited) != 0) {
+            free(b.data);
+            free(limited.data);
+            return -1;
+        }
+        free(b.data);
+        b = limited;
+    }
+    return fymd_buf_finish(&b, out, out_len);
 }
 
 /* Build stream options from the renderer's resolved config. */

@@ -66,6 +66,29 @@ fymd_render_reset(r);                   /* drop stream state to start another */
 fymd_renderer_destroy(r);
 ```
 
+### Raw fenced blocks
+
+Raw text can use the fenced-code presentation and syntax-highlighting pipeline
+without first being encoded as Markdown:
+
+```c
+struct fymd_fenced_block_opts block = {
+    .language = "c",
+    .flags = FYMD_FBF_STYLE | FYMD_FBF_HIGHLIGHT,
+};
+char *out;
+size_t out_len;
+fymd_render_fenced_block(r, source, source_len, &block, &out, &out_len);
+fymd_free(out);
+```
+
+`FYMD_FBF_STYLE` enables the theme's current header/footer rules, two-column
+code inset, plain-code styling and reverse bubble behavior. Without it, only
+the raw code rows are emitted. `FYMD_FBF_HIGHLIGHT` independently requests
+libfyts highlighting when `language` is supported. Passing `NULL` options uses
+both flags with no language. Input escape filtering and rendered-row limits are
+the same as for Markdown rendering; the text itself is never parsed as Markdown.
+
 ### Rendered-row limits
 
 A renderer can optionally expose a bounded terminal viewport. Configure it

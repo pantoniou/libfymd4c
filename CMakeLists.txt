@@ -196,6 +196,10 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(line-limit-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME line-limit-api COMMAND line-limit-api-test)
 
+        add_executable(fenced-api-test test/fenced-api-test.c)
+        target_link_libraries(fenced-api-test PRIVATE libfymd4c::libfymd4c)
+        add_test(NAME fenced-api COMMAND fenced-api-test)
+
         # CommonMark (+ extension) conformance suites. Each spec file holds a
         # sequence of numbered examples; register every example as its own ctest
         # (driven through `fymd4c -t html`) so `ctest -j` runs them in parallel,

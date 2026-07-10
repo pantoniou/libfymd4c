@@ -68,6 +68,10 @@ extern "C"
  * at finish, when the block is truly closed. */
 #define MD_ANSI_FLAG_STREAM_OPEN_CODE 0x1000
 
+/* Presentation flags for md_ansi_fenced_styled(). */
+#define MD_ANSI_FENCE_STYLE     0x01
+#define MD_ANSI_FENCE_HIGHLIGHT 0x02
+
     /* Render Markdown into ANSI terminal output.
      *
      * Produces text with ANSI escape codes for terminal display (bold, italic,
@@ -115,6 +119,15 @@ extern "C"
                           void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
                           void *userdata, unsigned parser_flags, unsigned renderer_flags,
                           int width, const struct MD_ANSI_STYLE *style);
+
+    /* Render raw text through the fenced-code pipeline without Markdown
+     * parsing. STYLE enables the existing rules/margin/plain-code styling;
+     * HIGHLIGHT requests libfyts highlighting when language is supported. */
+    int md_ansi_fenced_styled(const MD_CHAR *input, MD_SIZE input_size,
+                              const char *language, unsigned fence_flags,
+                              void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
+                              void *userdata, unsigned renderer_flags, int width,
+                              const struct MD_ANSI_STYLE *style);
 
     /* Resolve the auto layout width: from $COLUMNS, then the terminal
      * (TIOCGWINSZ), else 80. This is what MD_ANSI_WIDTH_AUTO uses internally;

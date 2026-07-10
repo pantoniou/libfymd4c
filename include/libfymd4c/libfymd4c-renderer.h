@@ -133,6 +133,19 @@ struct fymd_line_limit_opts {
     const char *separator_format; /* one %d; %% is accepted; NULL => default */
 };
 
+/* Raw fenced-block presentation flags. */
+enum fymd_fenced_block_flags {
+    FYMD_FBF_STYLE     = FYMD_BIT(0), /* rules, code margin and theme styling */
+    FYMD_FBF_HIGHLIGHT = FYMD_BIT(1)  /* highlight a supported language */
+};
+
+#define FYMD_FBF_DEFAULT (FYMD_FBF_STYLE | FYMD_FBF_HIGHLIGHT)
+
+struct fymd_fenced_block_opts {
+    const char *language;              /* NUL-terminated; NULL/empty => plain */
+    enum fymd_fenced_block_flags flags;
+};
+
 /* Progressive line-diff update produced by fymd_render_push().
  *
  * Apply to a virtual terminal as: move the cursor up `backtrack` lines, clear
@@ -173,6 +186,16 @@ int fymd_render(struct fymd_renderer *r, const char *md, size_t len,
 /* Convenience wrapper around fymd_render(): returns a heap-allocated,
  * NUL-terminated string (free with fymd_free()), or NULL on error. */
 char *fymd_render_to_string(struct fymd_renderer *r, const char *md, size_t len) FYMD_EXPORT;
+
+/* Render raw text through the fenced-code renderer without interpreting it as
+ * Markdown. Pass NULL opts for FYMD_FBF_DEFAULT with no language. STYLE uses
+ * the current theme's fence rules, margin and plain-code styling; without it,
+ * only the code content is emitted. The returned buffer follows fymd_render()
+ * ownership rules and is also subject to the renderer's rendered-row limit. */
+int fymd_render_fenced_block(struct fymd_renderer *r,
+        const char *text, size_t len,
+        const struct fymd_fenced_block_opts *opts,
+        char **out, size_t *out_len) FYMD_EXPORT;
 
 /* Feed the next chunk of a streamed document and get a progressive update for
  * the active region. The renderer holds one live stream; the first push starts

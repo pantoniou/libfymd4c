@@ -1545,7 +1545,7 @@ ansi_fyts_write(const void* data, size_t len, void* user)
  *   0 = fall back to plain;  1 = emitted code (caller draws the footer);
  *   2 = emitted the whole block including header and footer. */
 static int
-emit_highlighted_code(MD_ANSI* r)
+emit_highlighted_code(MD_ANSI* r, int styled)
 {
     struct fyts_config cfg;
     char lang[64];
@@ -1556,13 +1556,14 @@ emit_highlighted_code(MD_ANSI* r)
     void* saved_ud;
     /* The fenced-code bubble is a special case: in whole-document card mode it
      * is suppressed, so code is highlighted normally and sits on the card. */
-    int rc, reverse = r->style->code_reverse && !r->card;
+    int rc, reverse = styled && r->style->code_reverse && !r->card;
     /* Clip width for fyts: 0 (no wrap / MD_ANSI_WIDTH_INF) means no clipping,
      * matching prose. fyts subtracts the line_prefix (indent + 2-space margin)
      * itself, so reserving DOC_MARGIN here lands the content inside the rule box.
      * The header/footer rules below still need a finite width, so they fall back
      * to the terminal width separately. */
-    int clip_width = (r->wrap_cols > 0) ? r->wrap_cols - DOC_MARGIN : 0;
+    int clip_width = (r->wrap_cols > 0)
+                   ? r->wrap_cols - (styled ? DOC_MARGIN : 0) : 0;
 
     if(r->code_lang_size == 0 || r->code_size == 0)
         return 0;
@@ -1576,8 +1577,10 @@ emit_highlighted_code(MD_ANSI* r)
     saved_ud = r->userdata;
     r->process_output = ansi_capture_append;
     r->userdata = &cap;
-    render_indent(r);
-    RENDER_VERBATIM(r, "  ");
+    if(styled) {
+        render_indent(r);
+        RENDER_VERBATIM(r, "  ");
+    }
     r->process_output = saved_out;
     r->userdata = saved_ud;
     prefix[cap.size] = '\0';
@@ -1909,7 +1912,7 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             int done = 0;
             if(r->code_highlight) {
 #ifdef MD4C_WITH_FYTS
-                done = emit_highlighted_code(r);
+                done = emit_highlighted_code(r, 1);
 #endif
                 if(done == 0) {
                     /* Fall back to plain. In reverse mode the header was deferred
@@ -2306,4 +2309,155 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
             md_ansi_style_destroy(owned_style);
         return ret;
     }
+}
+
+/* Emit raw code one physical line at a time. Styled blocks use the same
+ * two-column inset, clipping and code_block style as Markdown fences. */
+static void
+emit_raw_code(MD_ANSI* r, int styled)
+{
+    MD_SIZE start = 0, end;
+    int avail = 0;
+
+    if(styled) {
+        avail = (r->wrap_cols > 0)
+              ? r->wrap_cols - ansi_indent_width(r) - 2 - DOC_MARGIN : 0;
+        if(r->wrap_cols > 0 && avail < 1)
+            avail = 1;
+        render_ansi(r, r->style->code_block.on);
+    } else if(r->wrap_cols > 0) {
+        avail = r->wrap_cols;
+    }
+
+    while(start < r->code_size) {
+        MD_SIZE len;
+        for(end = start; end < r->code_size && r->code_buf[end] != '\n'; end++)
+            ;
+        len = end - start;
+        if(styled) {
+            render_indent(r);
+            RENDER_VERBATIM(r, "  ");
+        }
+        if(avail > 0)
+            len = ansi_clip_bytes(r->code_buf + start, len, avail);
+        if(len > 0)
+            render_verbatim(r, r->code_buf + start, len);
+        render_newline(r);
+        start = end < r->code_size ? end + 1 : end;
+    }
+    if(styled)
+        render_ansi(r, r->style->code_block.off);
+}
+
+int
+md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
+                       const char* language, unsigned fence_flags,
+                       void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
+                       void* userdata, unsigned renderer_flags, int width,
+                       const struct MD_ANSI_STYLE* style)
+{
+    MD_ANSI render;
+    MD_ANSI_STYLE* owned_style = NULL;
+    char* filtered = NULL;
+    const char* code = input;
+    MD_SIZE code_size = input_size;
+    int styled = (fence_flags & MD_ANSI_FENCE_STYLE) != 0;
+    int done = 0, ret = 0;
+
+    if(process_output == NULL || (input == NULL && input_size > 0))
+        return -1;
+    memset(&render, 0, sizeof(render));
+    render.process_output = process_output;
+    render.real_output = process_output;
+    render.userdata = userdata;
+    render.flags = renderer_flags & ~(unsigned)(MD_ANSI_FLAG_HEAL |
+                                                 MD_ANSI_FLAG_CODE_META |
+                                                 MD_ANSI_FLAG_STREAM_OPEN_CODE);
+    render.table_width = width;
+    if(style == NULL) {
+        owned_style = md_ansi_style_create(NULL, 0, NULL);
+        if(owned_style == NULL)
+            return -1;
+        style = owned_style;
+    }
+    render.style = style;
+    if((renderer_flags & MD_ANSI_FLAG_REVERSE) &&
+       !(renderer_flags & MD_ANSI_FLAG_NO_COLOR) &&
+       style->reverse.on != NULL && style->reverse.on[0] != '\0')
+        render.card = 1;
+    if(width == MD_ANSI_WIDTH_INF)
+        render.wrap_cols = 0;
+    else if(width > 0)
+        render.wrap_cols = width;
+    else
+        render.wrap_cols = table_term_width();
+
+    /* Apply the same embedded-escape policy as Markdown code text. */
+    if(!(render.flags & MD_ANSI_FLAG_SGR_KEEP) && input_size > 0 &&
+       memchr(input, 0x1b, input_size) != NULL) {
+        filtered = (char*) malloc(input_size);
+        if(filtered == NULL) {
+            ret = -1;
+            goto out;
+        }
+        code_size = sgr_filter_input(render.flags, input, input_size, filtered);
+        code = filtered;
+    }
+    if(code_size > 0) {
+        render.code_buf = (char*) malloc(code_size);
+        if(render.code_buf == NULL) {
+            ret = -1;
+            goto out;
+        }
+        memcpy(render.code_buf, code, code_size);
+        render.code_size = code_size;
+        render.code_cap = code_size;
+    }
+    if(language != NULL && language[0] != '\0') {
+        size_t n = strlen(language);
+        if(n >= sizeof(render.code_lang))
+            n = sizeof(render.code_lang) - 1;
+        memcpy(render.code_lang, language, n);
+        render.code_lang[n] = '\0';
+        render.code_lang_size = (MD_SIZE) n;
+    }
+#ifdef MD4C_WITH_FYTS
+    if((fence_flags & MD_ANSI_FENCE_HIGHLIGHT) && style->code_enabled &&
+       render.code_lang_size > 0 && fyts_language_supported(render.code_lang))
+        render.code_highlight = 1;
+#endif
+
+    if(styled && !(render.code_highlight && style->code_reverse && !render.card))
+        render_code_rule(&render, render.code_lang, render.code_lang_size);
+    if(render.code_highlight) {
+#ifdef MD4C_WITH_FYTS
+        done = emit_highlighted_code(&render, styled);
+#endif
+        if(done == 0) {
+            if(styled && style->code_reverse && !render.card)
+                render_code_rule(&render, render.code_lang, render.code_lang_size);
+            emit_raw_code(&render, styled);
+        }
+    } else {
+        emit_raw_code(&render, styled);
+    }
+    if(styled && done != 2) {
+        if(render.line_dirty)
+            render_newline(&render);
+        render_code_rule(&render, NULL, 0);
+    }
+
+out:
+    if(render.line_open)
+        flush_wrapped(&render);
+    if(render.card && render.card_size > 0)
+        flush_card_line(&render);
+    free(filtered);
+    free(render.lbuf);
+    free(render.code_buf);
+    free(render.sgr_buf);
+    free(render.card_buf);
+    if(owned_style != NULL)
+        md_ansi_style_destroy(owned_style);
+    return ret;
 }
