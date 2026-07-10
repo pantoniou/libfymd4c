@@ -1,0 +1,31 @@
+# Solarized, coordinated with libfyts.
+styles:
+  reset:            "\e[0m"
+  default-fg:       "\e[39m"
+  sz-heading:       "\e[1;38;2;38;139;210m"
+  sz-cyan:          "\e[38;2;42;161;152m"
+  sz-green:         "\e[38;2;133;153;0m"
+  sz-yellow:        "\e[38;2;181;137;0m"
+  sz-muted-dark:    "\e[38;2;88;110;117m"
+  sz-muted-light:   "\e[38;2;147;161;161m"
+  sz-header-dark:   "\e[1;48;2;7;54;66m"
+  sz-header-light:  "\e[1;48;2;238;232;213m"
+  sz-row-dark:      "\e[48;2;0;48;59m"
+  sz-row-light:     "\e[48;2;250;244;224m"
+  bg-off:           "\e[49m"
+
+elements:
+  heading:          { on: sz-heading, off: reset }
+  code:             { on: sz-green, off: default-fg }
+  math:             { on: sz-yellow, off: default-fg }
+  link:             { on: sz-cyan, off: default-fg }
+  link_url:         { on: sz-muted-dark, off: default-fg, light: { on: sz-muted-light, off: default-fg } }
+  blockquote:       { on: sz-muted-dark, off: default-fg, light: { on: sz-muted-light, off: default-fg } }
+  rule:             { on: sz-muted-dark, off: default-fg, light: { on: sz-muted-light, off: default-fg } }
+  table_header_row: { on: sz-header-dark, off: bg-off, light: { on: sz-header-light, off: bg-off } }
+  table_row_even:   { on: sz-row-dark, off: bg-off, light: { on: sz-row-light, off: bg-off } }
+  list_marker:      { on: sz-cyan, off: default-fg }
+  task_done:        { on: sz-green, off: default-fg }
+
+code:
+  theme: solarized

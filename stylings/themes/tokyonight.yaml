@@ -1,0 +1,35 @@
+# Tokyo Night (dark) / Moon (light), coordinated with libfyts.
+styles:
+  reset:            "\e[0m"
+  default-fg:       "\e[39m"
+  tn-heading-dark:  "\e[1;38;2;187;154;247m"
+  tn-heading-light: "\e[1;38;2;192;153;255m"
+  tn-blue-dark:     "\e[38;2;122;162;247m"
+  tn-blue-light:    "\e[38;2;75;110;175m"
+  tn-green-dark:    "\e[38;2;158;206;106m"
+  tn-green-light:   "\e[38;2;72;119;50m"
+  tn-yellow-dark:   "\e[38;2;224;175;104m"
+  tn-yellow-light:  "\e[38;2;143;94;21m"
+  tn-muted-dark:    "\e[38;2;86;95;137m"
+  tn-muted-light:   "\e[38;2;99;109;166m"
+  tn-header-dark:   "\e[1;48;2;41;46;66m"
+  tn-header-light:  "\e[1;48;2;207;214;245m"
+  tn-row-dark:      "\e[48;2;26;27;38m"
+  tn-row-light:     "\e[48;2;232;235;249m"
+  bg-off:           "\e[49m"
+
+elements:
+  heading:          { on: tn-heading-dark, off: reset, light: { on: tn-heading-light, off: reset } }
+  code:             { on: tn-green-dark, off: default-fg, light: { on: tn-green-light, off: default-fg } }
+  math:             { on: tn-yellow-dark, off: default-fg, light: { on: tn-yellow-light, off: default-fg } }
+  link:             { on: tn-blue-dark, off: default-fg, light: { on: tn-blue-light, off: default-fg } }
+  link_url:         { on: tn-muted-dark, off: default-fg, light: { on: tn-muted-light, off: default-fg } }
+  blockquote:       { on: tn-muted-dark, off: default-fg, light: { on: tn-muted-light, off: default-fg } }
+  rule:             { on: tn-muted-dark, off: default-fg, light: { on: tn-muted-light, off: default-fg } }
+  table_header_row: { on: tn-header-dark, off: bg-off, light: { on: tn-header-light, off: bg-off } }
+  table_row_even:   { on: tn-row-dark, off: bg-off, light: { on: tn-row-light, off: bg-off } }
+  list_marker:      { on: tn-heading-dark, off: default-fg, light: { on: tn-heading-light, off: default-fg } }
+  task_done:        { on: tn-green-dark, off: default-fg, light: { on: tn-green-light, off: default-fg } }
+
+code:
+  theme: tokyonight

@@ -1,0 +1,35 @@
+# Catppuccin Mocha (dark) / Latte (light), coordinated with libfyts.
+styles:
+  reset:            "\e[0m"
+  default-fg:       "\e[39m"
+  cp-heading-dark:  "\e[1;38;2;203;166;247m"
+  cp-heading-light: "\e[1;38;2;136;57;239m"
+  cp-blue-dark:     "\e[38;2;137;180;250m"
+  cp-blue-light:    "\e[38;2;30;102;245m"
+  cp-green-dark:    "\e[38;2;166;227;161m"
+  cp-green-light:   "\e[38;2;64;160;43m"
+  cp-yellow-dark:   "\e[38;2;249;226;175m"
+  cp-yellow-light:  "\e[38;2;223;142;29m"
+  cp-muted-dark:    "\e[38;2;127;132;156m"
+  cp-muted-light:   "\e[38;2;140;143;161m"
+  cp-header-dark:   "\e[1;48;2;49;50;68m"
+  cp-header-light:  "\e[1;48;2;220;224;232m"
+  cp-row-dark:      "\e[48;2;30;30;46m"
+  cp-row-light:     "\e[48;2;239;241;245m"
+  bg-off:           "\e[49m"
+
+elements:
+  heading:          { on: cp-heading-dark, off: reset, light: { on: cp-heading-light, off: reset } }
+  code:             { on: cp-green-dark, off: default-fg, light: { on: cp-green-light, off: default-fg } }
+  math:             { on: cp-yellow-dark, off: default-fg, light: { on: cp-yellow-light, off: default-fg } }
+  link:             { on: cp-blue-dark, off: default-fg, light: { on: cp-blue-light, off: default-fg } }
+  link_url:         { on: cp-muted-dark, off: default-fg, light: { on: cp-muted-light, off: default-fg } }
+  blockquote:       { on: cp-muted-dark, off: default-fg, light: { on: cp-muted-light, off: default-fg } }
+  rule:             { on: cp-muted-dark, off: default-fg, light: { on: cp-muted-light, off: default-fg } }
+  table_header_row: { on: cp-header-dark, off: bg-off, light: { on: cp-header-light, off: bg-off } }
+  table_row_even:   { on: cp-row-dark, off: bg-off, light: { on: cp-row-light, off: bg-off } }
+  list_marker:      { on: cp-heading-dark, off: default-fg, light: { on: cp-heading-light, off: default-fg } }
+  task_done:        { on: cp-green-dark, off: default-fg, light: { on: cp-green-light, off: default-fg } }
+
+code:
+  theme: catppuccin

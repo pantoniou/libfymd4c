@@ -1,0 +1,35 @@
+# Kanagawa Wave (dark) / Lotus (light), coordinated with libfyts.
+styles:
+  reset:            "\e[0m"
+  default-fg:       "\e[39m"
+  kg-heading-dark:  "\e[1;38;2;149;127;184m"
+  kg-heading-light: "\e[1;38;2;98;76;131m"
+  kg-blue-dark:     "\e[38;2;126;156;216m"
+  kg-blue-light:    "\e[38;2;77;105;155m"
+  kg-green-dark:    "\e[38;2;152;187;108m"
+  kg-green-light:   "\e[38;2;111;137;78m"
+  kg-yellow-dark:   "\e[38;2;230;195;132m"
+  kg-yellow-light:  "\e[38;2;180;116;0m"
+  kg-muted-dark:    "\e[38;2;114;113;105m"
+  kg-muted-light:   "\e[38;2;113;110;97m"
+  kg-header-dark:   "\e[1;48;2;42;42;55m"
+  kg-header-light:  "\e[1;48;2;226;224;213m"
+  kg-row-dark:      "\e[48;2;31;31;40m"
+  kg-row-light:     "\e[48;2;241;239;230m"
+  bg-off:           "\e[49m"
+
+elements:
+  heading:          { on: kg-heading-dark, off: reset, light: { on: kg-heading-light, off: reset } }
+  code:             { on: kg-green-dark, off: default-fg, light: { on: kg-green-light, off: default-fg } }
+  math:             { on: kg-yellow-dark, off: default-fg, light: { on: kg-yellow-light, off: default-fg } }
+  link:             { on: kg-blue-dark, off: default-fg, light: { on: kg-blue-light, off: default-fg } }
+  link_url:         { on: kg-muted-dark, off: default-fg, light: { on: kg-muted-light, off: default-fg } }
+  blockquote:       { on: kg-muted-dark, off: default-fg, light: { on: kg-muted-light, off: default-fg } }
+  rule:             { on: kg-muted-dark, off: default-fg, light: { on: kg-muted-light, off: default-fg } }
+  table_header_row: { on: kg-header-dark, off: bg-off, light: { on: kg-header-light, off: bg-off } }
+  table_row_even:   { on: kg-row-dark, off: bg-off, light: { on: kg-row-light, off: bg-off } }
+  list_marker:      { on: kg-heading-dark, off: default-fg, light: { on: kg-heading-light, off: default-fg } }
+  task_done:        { on: kg-green-dark, off: default-fg, light: { on: kg-green-light, off: default-fg } }
+
+code:
+  theme: kanagawa
