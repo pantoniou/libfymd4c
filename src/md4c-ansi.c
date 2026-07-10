@@ -2370,6 +2370,11 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
     render.process_output = process_output;
     render.real_output = process_output;
     render.userdata = userdata;
+    /* Highlighted output and raw code rows must bypass the prose line buffer.
+     * Without this, the prefix capture leaves spaces buffered ahead of only
+     * the first highlighted line and the highlighter's framed rows are wrapped
+     * a second time. */
+    render.in_code_block = 1;
     render.flags = renderer_flags & ~(unsigned)(MD_ANSI_FLAG_HEAL |
                                                  MD_ANSI_FLAG_CODE_META |
                                                  MD_ANSI_FLAG_STREAM_OPEN_CODE);

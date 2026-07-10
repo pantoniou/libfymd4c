@@ -22,8 +22,10 @@ main(void)
     struct fymd_renderer *r;
     struct fymd_fenced_block_opts opts;
     struct fymd_line_limit_opts limit;
-    char *bare = NULL, *styled = NULL, *limited = NULL, *safe = NULL;
-    size_t bare_len = 0, styled_len = 0, limited_len = 0, safe_len = 0;
+    char *bare = NULL, *styled = NULL, *highlighted = NULL;
+    char *limited = NULL, *safe = NULL;
+    size_t bare_len = 0, styled_len = 0, highlighted_len = 0;
+    size_t limited_len = 0, safe_len = 0;
     int failed = 0;
 
     memset(&cfg, 0, sizeof(cfg));
@@ -37,6 +39,13 @@ main(void)
     if(fymd_render_fenced_block(r, input, sizeof(input) - 1, &opts,
                                 &bare, &bare_len) != 0 ||
        bare_len != sizeof(input) - 1 || memcmp(bare, input, bare_len) != 0)
+        failed = 1;
+
+    opts.language = "c";
+    opts.flags = FYMD_FBF_DEFAULT;
+    if(fymd_render_fenced_block(r, "/*\n * line\n", sizeof("/*\n * line\n") - 1,
+                                &opts, &highlighted, &highlighted_len) != 0 ||
+       strstr(highlighted, "    /*\n     * line\n") == NULL)
         failed = 1;
 
     opts.language = "text";
@@ -66,6 +75,7 @@ main(void)
 
     fymd_free(bare);
     fymd_free(styled);
+    fymd_free(highlighted);
     fymd_free(limited);
     fymd_free(safe);
     fymd_renderer_destroy(r);
