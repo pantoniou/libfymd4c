@@ -88,6 +88,13 @@ enum fymd_sgr_input {
                            rest (cursor moves, screen clears, OSC, ...) */
 };
 
+/* Table border override, applied on top of the selected theme's table.border. */
+enum fymd_table_border {
+    FYMD_TB_THEME = 0,  /* default: use the theme's table.border */
+    FYMD_TB_GRID,       /* force grid borders */
+    FYMD_TB_NONE        /* force borderless (no separators/vertical glyphs) */
+};
+
 /* Layout width sentinels (match the columns argument otherwise). */
 #define FYMD_WIDTH_AUTO (-1) /* detect from $COLUMNS / terminal, else 80 */
 #define FYMD_WIDTH_INF  0    /* unlimited: size tables to content, no wrap */
@@ -109,6 +116,7 @@ struct fymd_renderer_cfg {
     enum fymd_background background;
     enum fymd_sgr_input sgr_input; /* input-escape policy; default FYMD_SGR_STRIP */
     const char *code_theme;     /* libfyts styling name/path; NULL => theme default */
+    enum fymd_table_border table_border; /* override theme table.border; default THEME */
     void *userdata;             /* opaque, propagated to fymd_renderer_get_cfg() */
 };
 

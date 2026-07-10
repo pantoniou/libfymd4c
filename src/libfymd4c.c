@@ -398,6 +398,10 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
         r->style->code_theme = r->cfg.code_theme; /* owned by cfg; freed there */
         r->style->code_enabled = (cfg->flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;
     }
+    if(cfg->table_border == FYMD_TB_GRID)
+        r->style->table_border_none = 0;
+    else if(cfg->table_border == FYMD_TB_NONE)
+        r->style->table_border_none = 1;
 
     /* Map public flags onto MD_ANSI_FLAG_*. */
 #ifndef MD4C_USE_ASCII
@@ -506,6 +510,10 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
         style->code_theme = r->cfg.code_theme;
         style->code_enabled = (r->cfg.flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;
     }
+    if(r->cfg.table_border == FYMD_TB_GRID)
+        style->table_border_none = 0;
+    else if(r->cfg.table_border == FYMD_TB_NONE)
+        style->table_border_none = 1;
     md_ansi_style_destroy(r->style);
     r->style = style;
     free((void *)r->cfg.style);
