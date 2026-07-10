@@ -75,6 +75,7 @@ static const char* style_path = NULL;
 static enum fymd_background forced_bg = FYMD_BG_AUTO;
 static enum fymd_sgr_input sgr_input = FYMD_SGR_STRIP;
 static int forced_reverse = 0;
+static const char* forced_language = NULL; /* NULL => Markdown; "auto" => path */
 
 /* HTML output. */
 /* Skip a leading UTF-8 BOM by default, matching the historical md2html. */
@@ -146,6 +147,18 @@ count_nl(const char* s, size_t n)
     for(i = 0; i < n; i++)
         if(s[i] == '\n') c++;
     return c;
+}
+
+static size_t
+common_complete_lines(const char* a, size_t an, const char* b, size_t bn)
+{
+    size_t i = 0, line = 0, n = an < bn ? an : bn;
+    while(i < n && a[i] == b[i]) {
+        if(a[i] == '\n')
+            line = i + 1;
+        i++;
+    }
+    return line;
 }
 
 /* Read the whole stream into buf. */
@@ -294,6 +307,70 @@ process_ansi_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live)
     return ret;
 }
 
+/* Progressive raw fenced-block rendering. Unlike the Markdown stream, raw
+ * code has no parser sync points: accumulate the source, render the current
+ * block, and line-diff it against the previously displayed viewport. */
+static int
+process_fenced_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live,
+                      const char* language)
+{
+    struct membuffer input = {0}, accum = {0}, shown = {0};
+    struct fymd_fenced_block_opts opts;
+    size_t off = 0;
+    int ret = 0, first = 1;
+
+    read_all(in, &input);
+    membuf_init(&accum, input.size > 0 ? input.size : 1);
+    membuf_init(&shown, 8192);
+    memset(&opts, 0, sizeof(opts));
+    opts.language = language;
+    opts.flags = FYMD_FBF_DEFAULT;
+
+    while(off < input.size || first) {
+        char* rendered = NULL;
+        size_t rendered_len = 0, common, backtrack;
+
+        first = 0;
+        if(off < input.size) {
+            size_t n = next_chunk(input.data, input.size, off);
+            membuf_append(&accum, input.data + off, n);
+            off += n;
+        }
+        if(fymd_render_fenced_block(r, accum.data, accum.size, &opts,
+                                    &rendered, &rendered_len) != 0) {
+            ret = -1;
+            break;
+        }
+        common = common_complete_lines(shown.data, shown.size,
+                                       rendered, rendered_len);
+        backtrack = count_nl(shown.data + common, shown.size - common);
+        if(live) {
+            if(backtrack > 0) {
+                char esc[32];
+                int m = snprintf(esc, sizeof(esc), "\033[%uA\r\033[J",
+                                 (unsigned) backtrack);
+                fwrite(esc, 1, (size_t) m, out);
+            }
+            if(rendered_len > common)
+                fwrite(rendered + common, 1, rendered_len - common, out);
+            fflush(out);
+        }
+        shown.size = 0;
+        if(rendered_len > 0)
+            membuf_append(&shown, rendered, rendered_len);
+        fymd_free(rendered);
+        if(off < input.size)
+            stream_pause();
+    }
+
+    if(!live && ret == 0)
+        fwrite(shown.data, 1, shown.size, out);
+    membuf_fini(&shown);
+    membuf_fini(&accum);
+    membuf_fini(&input);
+    return ret;
+}
+
 static void
 write_fullhtml_head(FILE* out)
 {
@@ -327,11 +404,25 @@ process_file(const char* in_path, FILE* in, FILE* out, struct fymd_renderer* r)
     unsigned p_flags = parser_flags;
     char* o = NULL;
     size_t olen = 0;
+    char* detected_language = NULL;
+    const char* language = forced_language;
+
+    if(forced_language != NULL && strcmp(forced_language, "auto") == 0) {
+        if(in_path != NULL && strcmp(in_path, "<stdin>") != 0 &&
+           strcmp(in_path, "-") != 0)
+            detected_language = fymd_detect_language_for_path(in_path);
+        language = detected_language;
+    }
 
     /* Streaming ANSI mode reads input incrementally; handle before buffering. */
     if(output_format == FORMAT_ANSI && want_stream) {
         int live = want_stream_progressive && fymd_isatty(fymd_fileno(out));
-        return process_ansi_stream(in, out, r, live);
+        if(forced_language != NULL)
+            ret = process_fenced_stream(in, out, r, live, language);
+        else
+            ret = process_ansi_stream(in, out, r, live);
+        fymd_free(detected_language);
+        return ret;
     }
 
     read_all(in, &buf_in);
@@ -352,7 +443,16 @@ process_file(const char* in_path, FILE* in, FILE* out, struct fymd_renderer* r)
     t0 = clock();
     switch(output_format) {
         case FORMAT_ANSI:
-            ret = fymd_render(r, buf_in.data, buf_in.size, &o, &olen);
+            if(forced_language != NULL) {
+                struct fymd_fenced_block_opts block;
+                memset(&block, 0, sizeof(block));
+                block.language = language;
+                block.flags = FYMD_FBF_DEFAULT;
+                ret = fymd_render_fenced_block(r, buf_in.data, buf_in.size,
+                                                &block, &o, &olen);
+            } else {
+                ret = fymd_render(r, buf_in.data, buf_in.size, &o, &olen);
+            }
             break;
         case FORMAT_HTML:
             ret = fymd_render_html(buf_in.data, buf_in.size, p_flags, html_flags, &o, &olen);
@@ -385,6 +485,7 @@ process_file(const char* in_path, FILE* in, FILE* out, struct fymd_renderer* r)
     ret = 0;
 
 out:
+    fymd_free(detected_language);
     fymd_free(o);
     membuf_fini(&buf_in);
     return ret;
@@ -402,6 +503,7 @@ enum {
     OPT_BACKGROUND,
     OPT_SGR,
     OPT_REVERSE,
+    OPT_LANGUAGE,
     OPT_STREAM,
     OPT_STREAM_PROGRESSIVE,
     OPT_MAX_ACTIVE_LINES,
@@ -461,6 +563,7 @@ static const struct option long_options[] = {
     { "background",         required_argument, NULL, OPT_BACKGROUND },
     { "sgr",                required_argument, NULL, OPT_SGR },
     { "reverse",            no_argument,       NULL, OPT_REVERSE },
+    { "language",           required_argument, NULL, OPT_LANGUAGE },
     { "stream",             no_argument,       NULL, OPT_STREAM },
     { "stream-progressive", no_argument,       NULL, OPT_STREAM_PROGRESSIVE },
     { "max-active-lines",   required_argument, NULL, OPT_MAX_ACTIVE_LINES },
@@ -536,6 +639,7 @@ usage(void)
         "      --background=MODE  Background for light/dark styles: auto (default), dark, light\n"
         "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
         "      --reverse        Render the whole document as a card (background filled to width)\n"
+        "      --language=LANG  Render raw input as a fenced block; auto detects from FILE\n"
         "      --stream         Render incrementally (push mode)\n"
         "      --stream-progressive  Live progressive render; updates the active region in place\n"
         "      --max-active-lines=N  Cap the streaming active region to N input lines (0 = unlimited)\n"
@@ -593,6 +697,13 @@ parse_args(int argc, char** argv)
             case OPT_HEAL:        want_heal = 1; break;
             case OPT_REPLAY_FUZZ: want_replay_fuzz = 1; break;
             case OPT_REVERSE:     forced_reverse = 1; break;
+            case OPT_LANGUAGE:
+                if(optarg[0] == '\0') {
+                    fprintf(stderr, "Invalid empty --language value.\n");
+                    exit(1);
+                }
+                forced_language = optarg;
+                break;
             case OPT_STREAM:      want_stream = 1; break;
             case OPT_STREAM_PROGRESSIVE:
                 want_stream = 1; want_stream_progressive = 1; break;
@@ -804,6 +915,11 @@ parse_args(int argc, char** argv)
             fprintf(stderr, "Use --help for more info.\n");
             exit(1);
         }
+    }
+
+    if(forced_language != NULL && output_format != FORMAT_ANSI) {
+        fprintf(stderr, "--language is only valid with --format=ansi.\n");
+        exit(1);
     }
 }
 

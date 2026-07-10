@@ -200,6 +200,11 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(fenced-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME fenced-api COMMAND fenced-api-test)
 
+        add_test(
+            NAME fenced-cli
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test"
+            COMMAND ${PYTHON3_EXECUTABLE} fenced-cli-test.py -p "$<TARGET_FILE:fymd4c-cli>")
+
         # CommonMark (+ extension) conformance suites. Each spec file holds a
         # sequence of numbered examples; register every example as its own ctest
         # (driven through `fymd4c -t html`) so `ctest -j` runs them in parallel,

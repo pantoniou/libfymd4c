@@ -71,6 +71,10 @@ Assume terminal background: \fBauto\fR (default), \fBdark\fR, or \fBlight\fR.
 Render fenced code blocks in reverse "bubble" style.
 .
 .TP
+.B --language= \fILANG\fR
+Treat the input as raw source code and render it directly as one fenced block instead of parsing Markdown. \fBauto\fR detects the language from the input file name using the libfyts catalogue. With standard input, \fBauto\fR renders an unlabeled plain-code fence. This mode also works with \fB--stream-progressive\fR.
+.
+.TP
 .B --table-size= \fIMODE\fR
 Table sizing: fit to content or to width.
 .

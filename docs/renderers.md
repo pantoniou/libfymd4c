@@ -119,6 +119,12 @@ renderer that has started a stream.
 The CLI equivalents are `--max-lines`, `--line-overflow=scroll|head-tail`,
 `--line-head=N|balanced`, and `--line-separator=FORMAT`.
 
+The CLI's `--language=LANG` renders its entire input through the raw fenced-block
+API; `--language=auto` detects the language from the input filename through the
+same libfyts catalogue. It supports one-shot and progressive streaming modes,
+including rendered-row limits. With stdin or an unknown extension, automatic
+detection produces an unlabeled, unhighlighted fence.
+
 ### Config flags (`FYMD_RF_*`)
 
 | Flag                   | Description                                       |
