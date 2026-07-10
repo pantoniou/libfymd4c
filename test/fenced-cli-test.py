@@ -83,6 +83,45 @@ def main():
         if path is not None:
             os.unlink(path)
 
+    style_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as style:
+            style_path = style.name
+            style.write("code:\n  decoration:\n"
+                        "    header: 'BEGIN {language} {fill}'\n"
+                        "    footer: 'END'\n"
+                        "    prefix: '>> '\n")
+        themed = run(options.program,
+                     ["--language=text", "--style=" + style_path])
+        themed_stream = run(options.program,
+                            ["--language=text", "--style=" + style_path,
+                             "--stream-progressive", "--stream-chunk=3"])
+        lines = themed.stdout.splitlines()
+        if (themed.returncode == 0 and len(lines) >= 3 and
+                lines[0].startswith(b"  BEGIN text ") and
+                lines[1].startswith(b"  >> **literal markdown**") and
+                lines[-1] == b"  END" and themed_stream.stdout == themed.stdout):
+            passed += 1
+        else:
+            failed += 1
+            print("FAIL themed fence decoration: %r %r" %
+                  (themed.stdout, themed_stream.stdout))
+
+        with open(style_path, "w") as style:
+            style.write("code:\n  decoration:\n"
+                        "    header: ''\n    footer: ''\n    prefix: ''\n")
+        suppressed = run(options.program,
+                         ["--language=text", "--style=" + style_path])
+        suppressed_expected = b"".join(b"  " + line for line in SOURCE.splitlines(True))
+        if suppressed.returncode == 0 and suppressed.stdout == suppressed_expected:
+            passed += 1
+        else:
+            failed += 1
+            print("FAIL YAML-suppressed fence decoration: %r" % suppressed.stdout)
+    finally:
+        if style_path is not None:
+            os.unlink(style_path)
+
     invalid = run(options.program, ["--format=html", "--language=text"])
     if invalid.returncode != 0:
         passed += 1

@@ -144,6 +144,7 @@ enum fymd_fenced_block_flags {
 struct fymd_fenced_block_opts {
     const char *language;              /* NUL-terminated; NULL/empty => plain */
     enum fymd_fenced_block_flags flags;
+    fy_generic template_vars;          /* borrowed {key} substitution mapping */
 };
 
 /* Progressive line-diff update produced by fymd_render_push().
@@ -191,7 +192,9 @@ char *fymd_render_to_string(struct fymd_renderer *r, const char *md, size_t len)
  * Markdown. Pass NULL opts for FYMD_FBF_DEFAULT with no language. STYLE uses
  * the current theme's fence rules, margin and plain-code styling; without it,
  * only the code content is emitted. The returned buffer follows fymd_render()
- * ownership rules and is also subject to the renderer's rendered-row limit. */
+ * ownership rules and is also subject to the renderer's rendered-row limit.
+ * Each {key} in themed decoration templates is replaced from template_vars;
+ * the map is borrowed only for the duration of this call. */
 int fymd_render_fenced_block(struct fymd_renderer *r,
         const char *text, size_t len,
         const struct fymd_fenced_block_opts *opts,

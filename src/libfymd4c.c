@@ -566,7 +566,8 @@ fymd_render_fenced_block(struct fymd_renderer *r,
         ff |= MD_ANSI_FENCE_HIGHLIGHT;
 
     memset(&b, 0, sizeof(b));
-    rc = md_ansi_fenced_styled(text, (MD_SIZE) len, opts->language, ff,
+    rc = md_ansi_fenced_styled(text, (MD_SIZE) len, opts->language,
+                                opts->template_vars, ff,
                                 fymd_buf_append, &b, r->renderer_flags,
                                 r->width, r->style);
     if(rc != 0 || b.oom) {

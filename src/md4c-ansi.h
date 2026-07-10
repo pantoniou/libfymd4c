@@ -27,6 +27,7 @@
 #define MD4C_ANSI_H
 
 #include "md4c.h"
+#include <libfyaml/libfyaml-generic.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -124,7 +125,8 @@ extern "C"
      * parsing. STYLE enables the existing rules/margin/plain-code styling;
      * HIGHLIGHT requests libfyts highlighting when language is supported. */
     int md_ansi_fenced_styled(const MD_CHAR *input, MD_SIZE input_size,
-                              const char *language, unsigned fence_flags,
+                              const char *language, fy_generic template_vars,
+                              unsigned fence_flags,
                               void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
                               void *userdata, unsigned renderer_flags, int width,
                               const struct MD_ANSI_STYLE *style);

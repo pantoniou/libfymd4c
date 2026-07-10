@@ -28,6 +28,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _MSC_VER
+#include <malloc.h>
+#define FYMD_ALLOCA _alloca
+#else
+#include <alloca.h>
+#define FYMD_ALLOCA alloca
+#endif
+
 #if defined(unix) || defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
     #if !defined(__wasi__) && !defined(__wasm__)
         #define MD4C_ANSI_HAVE_IOCTL 1
@@ -36,6 +44,7 @@
     #endif
 #endif
 
+#include <libfyaml/libfyaml-allocator.h>
 #include "md4c-ansi.h"
 #include "md4c-heal-wrap.h"
 #include "md4c-style.h"
@@ -154,6 +163,7 @@ struct MD_ANSI_tag {
     MD_ANSI_TABLE* table;   /* non-NULL while inside a table block */
     int table_width;        /* >0 fixed, 0 = unlimited, <0 = auto-detect */
     const MD_ANSI_STYLE* style;  /* element styling (never NULL during render) */
+    fy_generic template_vars;    /* borrowed raw-fence {key} values */
 
     /* Prose word-wrap: content of the current logical line is collected into
      * lbuf (after its indent prefix), then wrapped to wrap_cols on newline. */
@@ -200,6 +210,7 @@ struct MD_ANSI_tag {
 /* Forward declarations (definitions live in the table-layout section). */
 typedef struct { MD_SIZE start; MD_SIZE len; int w; } TLINE;
 static void table_cell_append(MD_ANSI_TABLE* t, const MD_CHAR* text, MD_SIZE size);
+static MD_SIZE ansi_clip_bytes(const char* buf, MD_SIZE size, int width);
 
 /* Capture buffer for redirecting output (e.g. to measure the indent prefix). */
 typedef struct {
@@ -1458,21 +1469,118 @@ build_code_rule_text(const char* gl_horiz, const char* lang, MD_SIZE lang_size,
     return n;
 }
 
-/* Emit a dim rule line delimiting a fenced code block, at the document margin. */
+/* Build the template mapping by copying caller values first, then appending
+ * renderer values that the caller did not provide. */
+static fy_generic
+build_code_template_map(const MD_ANSI_STYLE* style, fy_generic vars,
+                        const char* lang, MD_SIZE lang_size, int cols,
+                        struct fy_generic_builder** gbp)
+{
+    fy_generic map, base, renderer_values;
+    fy_generic_sized_string language_value, fill_value;
+    size_t i;
+    char* fill = NULL;
+    size_t hlen = strlen(style->table_horizontal), fill_len;
+    struct fy_generic_builder* gb;
+
+    *gbp = NULL;
+    language_value.data = lang != NULL ? lang : "";
+    language_value.size = lang != NULL ? lang_size : 0;
+    fill_value.data = "";
+    fill_value.size = 0;
+    if(hlen > 0 && (size_t)cols <= (SIZE_MAX - 1) / hlen) {
+        fill_len = (size_t)cols * hlen;
+        fill = (char*) FYMD_ALLOCA(fill_len);
+        for(i = 0; i < (size_t)cols; i++)
+            memcpy(fill + i * hlen, style->table_horizontal, hlen);
+        fill_value.data = fill;
+        fill_value.size = fill_len;
+    }
+
+    gb = fy_generic_builder_create(NULL);
+    if(gb == NULL)
+        return fy_invalid;
+    renderer_values = fy_null_filtered_mapping(gb,
+            "language", lang != NULL ? fy_value(language_value) : fy_null,
+            "rule", style->table_horizontal != NULL
+                        ? fy_value(style->table_horizontal) : fy_null,
+            "fill", fill != NULL ? fy_value(fill_value) : fy_null);
+    base = fy_generic_is_mapping(vars) ? vars : fy_map_empty;
+    map = fy_merge(gb, base, renderer_values);
+    if(fy_generic_is_valid(map))
+        *gbp = gb;
+    else
+        fy_generic_builder_destroy(gb);
+    return map;
+}
+
+/* Expand every {key} by looking it up in the composed generic mapping.
+ * "default" preserves the legacy width-aware rule. */
+static size_t
+build_code_decoration_text(const MD_ANSI_STYLE* style, fy_generic vars,
+                           const char* tmpl,
+                           const char* lang, MD_SIZE lang_size, int cols,
+                           char* buf, size_t bufsz)
+{
+    size_t i = 0, n = 0;
+    const char* close;
+    const char* value;
+    fy_generic_sized_string key;
+    struct fy_generic_builder* gb = NULL;
+    fy_generic context;
+
+    if(tmpl == NULL || tmpl[0] == '\0')
+        return 0;
+    if(strcmp(tmpl, "default") == 0)
+        return build_code_rule_text(style->table_horizontal, lang, lang_size,
+                                    cols, buf, bufsz);
+    context = build_code_template_map(style, vars, lang, lang_size, cols, &gb);
+    if(!fy_generic_is_valid(context))
+        return 0;
+#define APPEND(p, len) do { size_t _l = (len); if(n + _l <= bufsz) { \
+        memcpy(buf + n, (p), _l); n += _l; } } while(0)
+    while(tmpl[i] != '\0') {
+        if(tmpl[i] == '{') {
+            close = strchr(tmpl + i + 1, '}');
+            if(close != NULL) {
+                key.data = tmpl + i + 1;
+                key.size = (size_t)(close - key.data);
+                value = fy_get(context, key, "");
+                APPEND(value, strlen(value));
+                i = (size_t)(close - tmpl) + 1;
+                continue;
+            }
+        }
+        APPEND(tmpl + i, 1);
+        i++;
+    }
+#undef APPEND
+    if(ansi_disp_width(buf, (MD_SIZE)n) > cols)
+        n = ansi_clip_bytes(buf, (MD_SIZE)n, cols);
+    fy_generic_builder_destroy(gb);
+    return n;
+}
+
+/* Emit a themed header/footer line delimiting a fenced code block. */
 static void
 render_code_rule(MD_ANSI* r, const char* lang, MD_SIZE lang_size)
 {
+    const char* tmpl = lang != NULL ? r->style->code_header
+                                    : r->style->code_footer;
     int width, avail;
     char buf[1024];
     size_t n;
 
+    if(tmpl == NULL || tmpl[0] == '\0')
+        return;
     render_indent(r);
     width = (r->wrap_cols > 0) ? r->wrap_cols : table_term_width();
     avail = width - r->indent_w - DOC_MARGIN;   /* match prose right margin */
     if(avail < 4) avail = 4;
 
-    n = build_code_rule_text(r->style->table_horizontal, lang, lang_size,
-                             avail, buf, sizeof(buf));
+    n = build_code_decoration_text(r->style, r->template_vars,
+                                   tmpl, lang, lang_size,
+                                   avail, buf, sizeof(buf));
     render_ansi(r, r->style->rule.on);
     render_verbatim(r, buf, (MD_SIZE) n);
     render_ansi(r, r->style->rule.off);
@@ -1505,8 +1613,10 @@ static void
 emit_plain_code(MD_ANSI* r)
 {
     MD_SIZE i, start = 0;
+    int prefixw = ansi_disp_width(r->style->code_prefix,
+                                  (MD_SIZE)strlen(r->style->code_prefix));
     int avail = (r->wrap_cols > 0)
-                ? r->wrap_cols - ansi_indent_width(r) - 2 - DOC_MARGIN : 0;
+                ? r->wrap_cols - ansi_indent_width(r) - prefixw - DOC_MARGIN : 0;
     if(r->wrap_cols > 0 && avail < 1) avail = 1;
     render_ansi(r, r->style->code_block.on);
     for(i = 0; i <= r->code_size; i++) {
@@ -1514,7 +1624,7 @@ emit_plain_code(MD_ANSI* r)
             if(i > start) {
                 MD_SIZE len = i - start;
                 render_indent(r);
-                RENDER_VERBATIM(r, "  ");
+                RENDER_VERBATIM(r, r->style->code_prefix);
                 if(avail > 0)
                     len = ansi_clip_bytes(r->code_buf + start, len, avail);
                 render_verbatim(r, r->code_buf + start, len);
@@ -1572,14 +1682,14 @@ emit_highlighted_code(MD_ANSI* r, int styled)
     memcpy(lang, r->code_lang, r->code_lang_size);
     lang[r->code_lang_size] = '\0';
 
-    /* Capture the per-line indent prefix (chrome + 2-space code margin). */
+    /* Capture the per-line indent prefix (chrome + themed code prefix). */
     saved_out = r->process_output;
     saved_ud = r->userdata;
     r->process_output = ansi_capture_append;
     r->userdata = &cap;
     if(styled) {
         render_indent(r);
-        RENDER_VERBATIM(r, "  ");
+        RENDER_VERBATIM(r, r->style->code_prefix);
     }
     r->process_output = saved_out;
     r->userdata = saved_ud;
@@ -1618,10 +1728,13 @@ emit_highlighted_code(MD_ANSI* r, int styled)
         int avail = width - r->indent_w - DOC_MARGIN;
         size_t hn, fn;
         if(avail < 4) avail = 4;
-        hn = build_code_rule_text(r->style->table_horizontal, r->code_lang,
-                                  r->code_lang_size, avail, header, sizeof(header) - 1);
-        fn = build_code_rule_text(r->style->table_horizontal, NULL, 0,
-                                  avail, footer, sizeof(footer) - 1);
+        hn = build_code_decoration_text(r->style, r->template_vars,
+                                        r->style->code_header,
+                                        r->code_lang, r->code_lang_size,
+                                        avail, header, sizeof(header) - 1);
+        fn = build_code_decoration_text(r->style, r->template_vars,
+                                        r->style->code_footer,
+                                        NULL, 0, avail, footer, sizeof(footer) - 1);
         header[hn] = '\0';
         footer[fn] = '\0';
         cfg.prolog = header;
@@ -1793,7 +1906,7 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                         r->process_output = ansi_capture_append;
                         r->userdata = &cap;
                         render_indent(r);
-                        RENDER_VERBATIM(r, "  ");
+                        RENDER_VERBATIM(r, r->style->code_prefix);
                         r->process_output = saved_out;
                         r->userdata = saved_ud;
                         if(cap.size <= sizeof(meta->prefix)) {
@@ -2148,13 +2261,16 @@ text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdat
                 } else {
                     if(r->need_indent) {
                         render_indent(r);
-                        RENDER_VERBATIM(r, "  ");
+                        RENDER_VERBATIM(r, r->style->code_prefix);
                         r->need_indent = 0;
                         r->code_col = 0;
                         /* Content sits inside the rule box: indent + 2-space code
                          * margin on the left, prose right margin on the right. */
                         r->code_clip = (r->wrap_cols > 0)
-                            ? r->wrap_cols - ansi_indent_width(r) - 2 - DOC_MARGIN : 0;
+                            ? r->wrap_cols - ansi_indent_width(r)
+                              - ansi_disp_width(r->style->code_prefix,
+                                    (MD_SIZE)strlen(r->style->code_prefix))
+                              - DOC_MARGIN : 0;
                         if(r->wrap_cols > 0 && r->code_clip < 1) r->code_clip = 1;
                     }
                     /* Clip the line to the prose right margin (wrap_cols == 0 =
@@ -2318,10 +2434,12 @@ emit_raw_code(MD_ANSI* r, int styled)
 {
     MD_SIZE start = 0, end;
     int avail = 0;
+    int prefixw = ansi_disp_width(r->style->code_prefix,
+                                  (MD_SIZE)strlen(r->style->code_prefix));
 
     if(styled) {
         avail = (r->wrap_cols > 0)
-              ? r->wrap_cols - ansi_indent_width(r) - 2 - DOC_MARGIN : 0;
+              ? r->wrap_cols - ansi_indent_width(r) - prefixw - DOC_MARGIN : 0;
         if(r->wrap_cols > 0 && avail < 1)
             avail = 1;
         render_ansi(r, r->style->code_block.on);
@@ -2336,7 +2454,7 @@ emit_raw_code(MD_ANSI* r, int styled)
         len = end - start;
         if(styled) {
             render_indent(r);
-            RENDER_VERBATIM(r, "  ");
+            RENDER_VERBATIM(r, r->style->code_prefix);
         }
         if(avail > 0)
             len = ansi_clip_bytes(r->code_buf + start, len, avail);
@@ -2351,7 +2469,8 @@ emit_raw_code(MD_ANSI* r, int styled)
 
 int
 md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
-                       const char* language, unsigned fence_flags,
+                       const char* language, fy_generic template_vars,
+                       unsigned fence_flags,
                        void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
                        void* userdata, unsigned renderer_flags, int width,
                        const struct MD_ANSI_STYLE* style)
@@ -2386,6 +2505,7 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
         style = owned_style;
     }
     render.style = style;
+    render.template_vars = template_vars;
     if((renderer_flags & MD_ANSI_FLAG_REVERSE) &&
        !(renderer_flags & MD_ANSI_FLAG_NO_COLOR) &&
        style->reverse.on != NULL && style->reverse.on[0] != '\0')

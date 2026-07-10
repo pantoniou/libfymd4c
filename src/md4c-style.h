@@ -61,6 +61,9 @@ typedef struct MD_ANSI_STYLE {
     const char*  code_theme;     /* libfyts styling name or path */
     MD_STYLE_BG  code_background;
     int          code_reverse;   /* fyts "reverse" bubble mode for fenced code */
+    const char*  code_header;    /* decoration template; "default" => legacy rule */
+    const char*  code_footer;    /* decoration template; "default" => legacy rule */
+    const char*  code_prefix;    /* prefix placed before every fenced content row */
 
     void* _owned;                /* opaque heap-string registry */
 } MD_ANSI_STYLE;

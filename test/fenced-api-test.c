@@ -27,6 +27,9 @@ main(void)
     size_t bare_len = 0, styled_len = 0, highlighted_len = 0;
     size_t limited_len = 0, safe_len = 0;
     int failed = 0;
+    struct fy_generic_builder *gb = NULL;
+    fy_generic vars = fy_invalid;
+    fy_generic_sized_string vars_yaml;
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.flags = FYMD_RF_NO_COLOR;
@@ -73,12 +76,49 @@ main(void)
        safe_len != 3 || memcmp(safe, "ok\n", 3) != 0)
         failed = 1;
 
+    /* Arbitrary {key} values are borrowed from the caller's generic map. */
+    gb = fy_generic_builder_create(NULL);
+    vars_yaml.data = "who: world\nmark: '!'\nlanguage: override\n";
+    vars_yaml.size = strlen(vars_yaml.data);
+    if(gb != NULL)
+        vars = fy_parse(gb, vars_yaml, FYOPPF_DEFAULT, NULL);
+    if(gb == NULL || !fy_generic_is_valid(vars)) {
+        failed = 1;
+    } else {
+        static const char theme[] =
+            "code:\n  decoration:\n"
+            "    header: 'Hello {who}{mark} {language}'\n"
+            "    footer: ''\n    prefix: ''\n";
+        struct fymd_renderer_cfg themed_cfg;
+        struct fymd_renderer *themed;
+        char *templated = NULL;
+        size_t templated_len = 0;
+        memset(&themed_cfg, 0, sizeof(themed_cfg));
+        themed_cfg.flags = FYMD_RF_NO_COLOR;
+        themed_cfg.width = 40;
+        themed_cfg.style = theme;
+        themed = fymd_renderer_create(&themed_cfg);
+        memset(&opts, 0, sizeof(opts));
+        opts.language = "c";
+        opts.flags = FYMD_FBF_STYLE;
+        opts.template_vars = vars;
+        if(themed == NULL ||
+           fymd_render_fenced_block(themed, "x\n", 2, &opts,
+                                    &templated, &templated_len) != 0 ||
+           strcmp(templated, "  Hello world! c\n  x\n") != 0)
+            failed = 1;
+        fymd_free(templated);
+        fymd_renderer_destroy(themed);
+    }
+
     fymd_free(bare);
     fymd_free(styled);
     fymd_free(highlighted);
     fymd_free(limited);
     fymd_free(safe);
     fymd_renderer_destroy(r);
+    if(gb != NULL)
+        fy_generic_builder_destroy(gb);
     if(failed)
         fprintf(stderr, "raw fenced-block API test failed\n");
     return failed;

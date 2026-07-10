@@ -120,13 +120,14 @@ resolve_background(const char* mode)
 static void
 build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_OPTS* opts)
 {
-    fy_generic elements, glyphs, code, styles;
+    fy_generic elements, glyphs, code, decoration, styles;
     const char* bg;
     int light;
 
     elements = fy_get(root, "elements", fy_invalid);
     glyphs   = fy_get(root, "glyphs",   fy_invalid);
     code     = fy_get(root, "code",     fy_invalid);
+    decoration = fy_get(code, "decoration", fy_invalid);
     styles   = fy_get(root, "styles",   fy_invalid);
 
     if(opts != NULL && opts->background != MD_STYLE_BG_AUTO)
@@ -165,6 +166,9 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
 
     s->code_enabled = (int) fy_get(code, "enabled", (long) 1);
     s->code_theme   = load_str(reg, code, "theme", "default");
+    s->code_header  = load_str(reg, decoration, "header", "default");
+    s->code_footer  = load_str(reg, decoration, "footer", "default");
+    s->code_prefix  = load_str(reg, decoration, "prefix", "  ");
     bg = fy_get(code, "background", "auto");
     if(strcmp(bg, "dark") == 0)        s->code_background = MD_STYLE_BG_DARK;
     else if(strcmp(bg, "light") == 0)  s->code_background = MD_STYLE_BG_LIGHT;

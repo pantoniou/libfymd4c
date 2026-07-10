@@ -73,3 +73,7 @@ code:
   theme:      default    # libfyts embedded "default", or a path to a styling YAML
   background: auto        # auto | dark | light (auto follows the document background)
   reverse:    false       # fyts "reverse" bubble mode (colour as background)
+  decoration:
+    header: default       # default, empty to suppress, or a template
+    footer: default       # templates substitute caller fy_generic {key} values
+    prefix: "  "          # emitted before each fenced-code content row

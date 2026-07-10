@@ -75,6 +75,7 @@ without first being encoded as Markdown:
 struct fymd_fenced_block_opts block = {
     .language = "c",
     .flags = FYMD_FBF_STYLE | FYMD_FBF_HIGHLIGHT,
+    .template_vars = variables, /* optional borrowed fy_generic mapping */
 };
 char *out;
 size_t out_len;
@@ -88,6 +89,10 @@ the raw code rows are emitted. `FYMD_FBF_HIGHLIGHT` independently requests
 libfyts highlighting when `language` is supported. Passing `NULL` options uses
 both flags with no language. Input escape filtering and rendered-row limits are
 the same as for Markdown rendering; the text itself is never parsed as Markdown.
+Decoration templates substitute arbitrary `{key}` placeholders from
+`template_vars`. The mapping is borrowed for the render call. Caller values
+override renderer context values; the default context provides `language`,
+`rule`, and width-aware `fill` values.
 
 ### Rendered-row limits
 
@@ -362,6 +367,10 @@ code:                # fenced-code highlighting (libfyts)
   enabled: true
   theme: default     # embedded "default", or a path to a libfyts styling YAML
   background: auto    # auto follows the document background
+  decoration:
+    header: default  # empty suppresses; templates substitute arbitrary {key} values
+    footer: default
+    prefix: "  "     # prefix before every fenced content row
 ```
 
 The `light:` sub-map of an element overrides its `on`/`off` on a light
