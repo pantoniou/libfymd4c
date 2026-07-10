@@ -120,7 +120,7 @@ resolve_background(const char* mode)
 static void
 build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_OPTS* opts)
 {
-    fy_generic elements, glyphs, code, decoration, styles;
+    fy_generic elements, glyphs, code, decoration, table, styles;
     const char* bg;
     int light;
 
@@ -128,6 +128,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     glyphs   = fy_get(root, "glyphs",   fy_invalid);
     code     = fy_get(root, "code",     fy_invalid);
     decoration = fy_get(code, "decoration", fy_invalid);
+    table    = fy_get(root, "table",    fy_invalid);
     styles   = fy_get(root, "styles",   fy_invalid);
 
     if(opts != NULL && opts->background != MD_STYLE_BG_AUTO)
@@ -152,6 +153,9 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     LP("code_block",    "\033[2m",    "\033[22m", code_block);
     LP("rule",          "\033[2m",    "\033[22m", rule);
     LP("table_header",  "\033[1m",    "\033[22m", table_header);
+    LP("table_header_row", "",         "",         table_header_row);
+    LP("table_row_odd",    "",         "",         table_row_odd);
+    LP("table_row_even",   "",         "",         table_row_even);
     LP("list_marker",   "\033[2m",    "\033[22m", list_marker);
     LP("task_done",     "\033[32m",   "\033[39m", task_done);
     /* Whole-document card background (mirrors libfyts' frame background). */
@@ -163,6 +167,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     s->table_vertical   = load_str(reg, glyphs, "table_vertical",   "\xe2\x94\x82");
     s->table_horizontal = load_str(reg, glyphs, "table_horizontal", "\xe2\x94\x80");
     s->table_cross      = load_str(reg, glyphs, "table_cross",      "\xe2\x94\xbc");
+    s->table_border_none = strcmp(fy_get(table, "border", "grid"), "none") == 0;
 
     s->code_enabled = (int) fy_get(code, "enabled", (long) 1);
     s->code_theme   = load_str(reg, code, "theme", "default");

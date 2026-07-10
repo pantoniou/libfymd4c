@@ -1,7 +1,4 @@
-# True borderless table: no vertical grid glyphs or header separator.
-table:
-  border: none
-
+# Complete-row styling: reverse header plus alternating body backgrounds.
 styles:
   table-header-row: "\e[7m"
   table-header-row-off: "\e[27m"

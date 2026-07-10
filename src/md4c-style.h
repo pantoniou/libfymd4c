@@ -45,6 +45,9 @@ typedef struct MD_ANSI_STYLE {
     MD_STYLE_PAIR code_block;    /* plain (unhighlighted) fenced code */
     MD_STYLE_PAIR rule;          /* hr + code header/footer rules */
     MD_STYLE_PAIR table_header;
+    MD_STYLE_PAIR table_header_row; /* styling spanning the complete header row */
+    MD_STYLE_PAIR table_row_odd;    /* complete body rows, first body row is odd */
+    MD_STYLE_PAIR table_row_even;
     MD_STYLE_PAIR list_marker;   /* list bullets / ordered numbers */
     MD_STYLE_PAIR task_done;     /* checked task-list marker */
     MD_STYLE_PAIR reverse;       /* whole-document card background (.on = bg set) */
@@ -54,6 +57,7 @@ typedef struct MD_ANSI_STYLE {
     const char* table_vertical;
     const char* table_horizontal;
     const char* table_cross;
+    int         table_border_none; /* true: no separator or vertical grid glyphs */
 
     MD_STYLE_BG  background;      /* resolved document background (never AUTO) */
 

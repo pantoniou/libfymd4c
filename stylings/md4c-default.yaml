@@ -51,6 +51,9 @@ elements:
   code_block:    { on: dim,       off: dim-off }
   rule:          { on: dim,       off: dim-off }
   table_header:  { on: bold,      off: bold-off }
+  table_header_row: { on: "",     off: "" }
+  table_row_odd:    { on: "",     off: "" }
+  table_row_even:   { on: "",     off: "" }
   list_marker:   { on: dim,       off: dim-off }
   task_done:     { on: green,     off: default-fg, light: { on: black,  off: default-fg } }
 
@@ -65,6 +68,10 @@ glyphs:
 # Background selecting the light/dark element variant: dark | light | auto.
 # auto consults $COLORFGBG (else assumes dark).
 background: auto
+
+# Table border policy: grid | none.
+table:
+  border: grid
 
 # Fenced code-block syntax highlighting (libfyts). The language catalogue is a
 # build-time choice (MD4C_FYTS_CATALOGUE); these are the runtime knobs.

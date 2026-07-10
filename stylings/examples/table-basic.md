@@ -2,6 +2,6 @@
 
 | Name  | Role        | Status |
 |-------|-------------|--------|
-| Alice | Maintainer  | Active |
+| [Alice](https://example.com/alice) | Maintainer  | Active |
 | Bob   | Contributor | Away   |
 | Carol | Reviewer    | Active |

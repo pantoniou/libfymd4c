@@ -14,8 +14,14 @@ build/fymd4c/fymd4c --style=stylings/examples/table-colored-header.yaml \
 
 build/fymd4c/fymd4c --style=stylings/examples/table-borderless.yaml \
   --width=60 stylings/examples/table-wrapping.md
+
+build/fymd4c/fymd4c --style=stylings/examples/table-striped.yaml \
+  --color=on stylings/examples/table-basic.md
 ```
 
-`table-borderless.yaml` suppresses the current grid glyphs but retains table
-layout and padding. It can become a true borderless policy when configurable
-table border policies are added.
+`table-borderless.yaml` uses the true `table.border: none` policy: vertical
+grid glyphs and the header separator are omitted while spacing and row styling
+are retained.
+
+`table-striped.yaml` demonstrates complete-row styling: a reverse header and
+alternating body-row backgrounds. Row backgrounds cover padding and separators.

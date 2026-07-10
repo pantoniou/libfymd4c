@@ -362,10 +362,13 @@ elements:            # each: { on: <style>, off: <style>, light: { on, off } }
   code: { on: cyan, off: default-fg, light: { on: blue, off: default-fg } }
   math: ...  link: ...  link_url: ...  wikilink: ...  blockquote: ...
   code_block: ...  rule: ...  table_header: ...  list_marker: ...  task_done: ...
+  table_header_row: ...  table_row_odd: ...  table_row_even: ...
 glyphs:
   blockquote_bar: "│"   list_bullet: "*"
   table_vertical: "│"   table_horizontal: "─"   table_cross: "┼"
 background: auto     # dark | light | auto (auto consults $COLORFGBG, else dark)
+table:
+  border: grid       # grid | none
 code:                # fenced-code highlighting (libfyts)
   enabled: true
   theme: default     # embedded "default", or a path to a libfyts styling YAML

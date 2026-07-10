@@ -200,6 +200,7 @@ struct MD_ANSI_tag {
     void (*real_output)(const MD_CHAR*, MD_SIZE, void*); /* sink when not capturing */
     char* card_buf;                 /* current line being accumulated */
     MD_SIZE card_size, card_cap;
+    const char* table_row_on;       /* active complete-row style to replay on reset */
 };
 
 
@@ -330,16 +331,45 @@ card_feed(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
     card_append(r, text + start, size - start);
 }
 
-/* Write bytes straight to the output callback (bypassing the line buffer). */
 static void
-out_direct(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
-    /* In card mode, route real output (but not internal captures, which swap
-     * process_output to a capture sink) through the per-line card transform. */
     if(r->card && r->process_output == r->real_output)
         card_feed(r, text, size);
     else
         r->process_output(text, size, r->userdata);
+}
+
+/* Write bytes straight to the output callback (bypassing the line buffer). */
+static void
+out_direct(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+{
+    MD_SIZE i, j, e;
+
+    /* A full reset inside inline cell content also clears the row background.
+     * Replay the active row style immediately; card mode then performs its own
+     * outer background replay when the completed line is flushed. */
+    if(r->table_row_on != NULL && r->table_row_on[0] != '\0' &&
+       r->process_output == r->real_output) {
+        for(i = 0; i < size; ) {
+            e = ansi_esc_len(text + i, size - i);
+            if(e > 0) {
+                out_sink(r, text + i, e);
+                if(e >= 3 && (unsigned char)text[i] == 0x1b && text[i + 1] == '[' &&
+                   text[i + e - 1] == 'm' && sgr_is_reset(text + i + 2, e - 3))
+                    out_sink(r, r->table_row_on,
+                             (MD_SIZE)strlen(r->table_row_on));
+                i += e;
+            } else {
+                for(j = i; j < size && (unsigned char)text[j] != 0x1b; j++)
+                    ;
+                out_sink(r, text + i, j - i);
+                i = j;
+            }
+        }
+    } else {
+        out_sink(r, text, size);
+    }
     if(size > 0)
         r->line_dirty = (text[size - 1] != '\n');
     if(r->flags & MD_ANSI_FLAG_CODE_META)
@@ -1252,7 +1282,8 @@ table_emit_slice(MD_ANSI* r, const char* buf, TLINE ln, int width,
 }
 
 static void
-table_emit_row(MD_ANSI* r, MD_ANSI_TROW* row, const int* widths, int n_cols)
+table_emit_row(MD_ANSI* r, MD_ANSI_TROW* row, const int* widths, int n_cols,
+               const MD_STYLE_PAIR* row_style)
 {
     TLINE** wrapped = (TLINE**) calloc((size_t) n_cols, sizeof(TLINE*));
     int* nlines = (int*) calloc((size_t) n_cols, sizeof(int));
@@ -1274,12 +1305,17 @@ table_emit_row(MD_ANSI* r, MD_ANSI_TROW* row, const int* widths, int n_cols)
 
     for(k = 0; k < height; k++) {
         render_indent(r);
+        if(row_style != NULL && row_style->on[0] != '\0') {
+            r->table_row_on = row_style->on;
+            render_ansi(r, row_style->on);
+        }
         RENDER_VERBATIM(r, " ");                 /* outer left cell padding */
         for(j = 0; j < n_cols; j++) {
             MD_ALIGN align = (j < r->table->n_aligns) ? r->table->aligns[j] : MD_ALIGN_DEFAULT;
             if(j > 0) {
                 RENDER_VERBATIM(r, " ");
-                RENDER_VERBATIM(r, r->style->table_vertical);
+                if(!r->style->table_border_none)
+                    RENDER_VERBATIM(r, r->style->table_vertical);
                 RENDER_VERBATIM(r, " ");
             }
             if(k < nlines[j])
@@ -1288,6 +1324,10 @@ table_emit_row(MD_ANSI* r, MD_ANSI_TROW* row, const int* widths, int n_cols)
                 tbl_spaces(r, widths[j]);
         }
         RENDER_VERBATIM(r, " ");                 /* outer right cell padding */
+        if(r->table_row_on != NULL) {
+            r->table_row_on = NULL;
+            render_ansi(r, row_style->off);
+        }
         render_newline(r);
     }
 
@@ -1297,11 +1337,16 @@ table_emit_row(MD_ANSI* r, MD_ANSI_TROW* row, const int* widths, int n_cols)
 }
 
 static void
-table_emit_separator(MD_ANSI* r, const int* widths, int n_cols)
+table_emit_separator(MD_ANSI* r, const int* widths, int n_cols,
+                     const MD_STYLE_PAIR* row_style)
 {
     int j, k;
     const char* h = r->style->table_horizontal;
     render_indent(r);
+    if(row_style != NULL && row_style->on[0] != '\0') {
+        r->table_row_on = row_style->on;
+        render_ansi(r, row_style->on);
+    }
     RENDER_VERBATIM(r, h);                    /* under outer left padding */
     for(j = 0; j < n_cols; j++) {
         if(j > 0) {
@@ -1313,6 +1358,10 @@ table_emit_separator(MD_ANSI* r, const int* widths, int n_cols)
             RENDER_VERBATIM(r, h);
     }
     RENDER_VERBATIM(r, h);                    /* under outer right padding */
+    if(r->table_row_on != NULL) {
+        r->table_row_on = NULL;
+        render_ansi(r, row_style->off);
+    }
     render_newline(r);
 }
 
@@ -1325,6 +1374,7 @@ table_emit(MD_ANSI* r)
     int* widths;
     int indent_w, total = 0;
     int any_header = 0, emitted_sep = 0;
+    int body_row = 0;
 
     if(t == NULL)
         return;
@@ -1362,7 +1412,7 @@ table_emit(MD_ANSI* r)
      * here is the two outer cell paddings plus the " │ " gaps. */
     if(r->table_width != MD_ANSI_WIDTH_INF) {
         int wtarget = (r->table_width > 0) ? r->table_width : table_term_width();
-        int overhead = 2 + 3 * (n_cols - 1);
+        int overhead = 2 + (r->style->table_border_none ? 2 : 3) * (n_cols - 1);
         int content_avail = wtarget - indent_w - overhead - DOC_MARGIN; /* right margin */
         if(content_avail < n_cols) content_avail = n_cols;  /* >= 1 col each */
 
@@ -1403,14 +1453,24 @@ table_emit(MD_ANSI* r)
 
         for(i = 0; i < t->n_rows; i++) {
             MD_ANSI_TROW* row = &t->rows[i];
+            const MD_STYLE_PAIR* row_style;
             if(!row->is_header && any_header && !emitted_sep) {
-                table_emit_separator(r, widths, n_cols);
+                if(!r->style->table_border_none)
+                    table_emit_separator(r, widths, n_cols,
+                                         &r->style->table_header_row);
                 emitted_sep = 1;
             }
-            table_emit_row(r, row, widths, n_cols);
+            if(row->is_header) {
+                row_style = &r->style->table_header_row;
+            } else {
+                row_style = (body_row++ & 1) ? &r->style->table_row_even
+                                             : &r->style->table_row_odd;
+            }
+            table_emit_row(r, row, widths, n_cols, row_style);
         }
-        if(any_header && !emitted_sep)
-            table_emit_separator(r, widths, n_cols);
+        if(any_header && !emitted_sep && !r->style->table_border_none)
+            table_emit_separator(r, widths, n_cols,
+                                 &r->style->table_header_row);
 
         r->wrap_suspend = saved_suspend;
     }
