@@ -153,6 +153,13 @@ is_escaped(const char* text, unsigned pos)
     return (n % 2) != 0;
 }
 
+/* true if it's ESC followed by bracket */
+static inline int
+is_ansi_bracket(const char* text, unsigned pos)
+{
+    return pos > 0 && (unsigned char) text[pos - 1] == 0x1b;
+}
+
 /* Check if position i is part of a ``` sequence */
 static inline int
 is_triple_backtick(const char* text, unsigned size, unsigned i)
@@ -942,7 +949,8 @@ heal_links_and_images(HEAL_BUF* buf)
 
     /* Case 1: Incomplete URL — [text](url  (no closing paren) */
     for(i = (int)size - 1; i >= 1; i--) {
-        if(text[i] == '(' && text[i - 1] == ']') {
+        if(text[i] == '(' && text[i - 1] == ']' &&
+           !is_ansi_bracket(text, (unsigned)(i - 1))) {
             /* Found ]( — check if there's a closing ) after */
             unsigned j;
             int has_close = 0;
@@ -976,12 +984,14 @@ heal_links_and_images(HEAL_BUF* buf)
 
     /* Case 2: Incomplete text — [text  (no closing ]) */
     for(i = (int)size - 1; i >= 0; i--) {
-        if(text[i] == '[' && !is_escaped(text, (unsigned)i)) {
+        if(text[i] == '[' && !is_escaped(text, (unsigned)i) &&
+           !is_ansi_bracket(text, (unsigned)i)) {
             /* Check this [ doesn't have a matching ] */
             unsigned j;
             int has_close = 0;
             for(j = (unsigned)(i + 1); j < size; j++) {
-                if(text[j] == ']' && !is_escaped(text, j)) { has_close = 1; break; }
+                if(text[j] == ']' && !is_escaped(text, j) &&
+                   !is_ansi_bracket(text, j)) { has_close = 1; break; }
             }
             if(!has_close) {
                 int is_image = (i > 0 && text[i - 1] == '!');
