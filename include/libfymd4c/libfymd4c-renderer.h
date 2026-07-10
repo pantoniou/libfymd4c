@@ -112,6 +112,27 @@ struct fymd_renderer_cfg {
     void *userdata;             /* opaque, propagated to fymd_renderer_get_cfg() */
 };
 
+/* Optional viewport applied after ANSI rendering. The limit is measured in
+ * rendered terminal rows (so wrapping and blank rows count). */
+enum fymd_line_limit_mode {
+    FYMD_LLM_NONE = 0,
+    FYMD_LLM_SCROLL,       /* retain the newest max_lines rows */
+    FYMD_LLM_HEAD_TAIL     /* head rows, omission separator, tail rows */
+};
+
+enum fymd_line_split {
+    FYMD_LLS_HEAD_COUNT = 0, /* head_lines is explicit; tail gets the remainder */
+    FYMD_LLS_BALANCED        /* split max_lines - 1, extra row goes to the tail */
+};
+
+struct fymd_line_limit_opts {
+    enum fymd_line_limit_mode mode;
+    size_t max_lines;
+    enum fymd_line_split split;
+    size_t head_lines;          /* used only with FYMD_LLS_HEAD_COUNT */
+    const char *separator_format; /* one %d; %% is accepted; NULL => default */
+};
+
 /* Progressive line-diff update produced by fymd_render_push().
  *
  * Apply to a virtual terminal as: move the cursor up `backtrack` lines, clear
@@ -135,6 +156,13 @@ void fymd_renderer_destroy(struct fymd_renderer *r) FYMD_EXPORT;
 /* The configuration the renderer was created with (string fields are the
  * renderer's owned copies). Returns NULL if r is NULL. */
 const struct fymd_renderer_cfg *fymd_renderer_get_cfg(struct fymd_renderer *r) FYMD_EXPORT;
+
+/* Configure a rendered-row viewport. The options and format string are copied.
+ * Pass NULL, FYMD_LLM_NONE, or max_lines == 0 to disable it. This cannot be
+ * changed while a progressive stream exists; call fymd_render_reset() first.
+ * Returns 0 on success, -1 for invalid options or a live stream. */
+int fymd_renderer_set_line_limit(struct fymd_renderer *r,
+        const struct fymd_line_limit_opts *opts) FYMD_EXPORT;
 
 /* One-shot render of a whole Markdown document. On success *out receives a
  * heap-allocated, NUL-terminated ANSI string (free with fymd_free()) and

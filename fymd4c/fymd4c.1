@@ -86,6 +86,22 @@ Live progressive render: input is read incrementally and the active region (the 
 .B --max-active-lines= \fIN\fR
 Cap the progressive active region to \fIN\fR lines (0 => unlimited).
 .
+.TP
+.B --max-lines= \fIN\fR
+Cap ANSI output to \fIN\fR rendered terminal rows (0 => unlimited). Short output is not padded.
+.
+.TP
+.B --line-overflow= \fIMODE\fR
+Select the rendered-row overflow policy: \fBscroll\fR (retain the newest rows) or \fBhead-tail\fR (retain both ends with an omission row).
+.
+.TP
+.B --line-head= \fIN\fR|\fBbalanced\fR
+In head-tail mode, retain exactly \fIN\fR head rows or split the available content rows between the head and tail. The extra row in a balanced even-sized viewport goes to the tail.
+.
+.TP
+.B --line-separator= \fIFORMAT\fR
+Set the head-tail omission row. \fIFORMAT\fR must contain one \fB%d\fR for the omitted rendered-row count; \fB%%\fR emits a literal percent sign.
+.
 .SS HTML output options (\fB--format=html\fR):
 .
 .TP

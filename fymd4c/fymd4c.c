@@ -65,6 +65,11 @@ static int stream_mode = STREAM_MODE_SIZE;  /* how the input is chopped into pus
 static int stream_delay_ms = 0;     /* pause between pushes (progressive viewing) */
 static int want_stream_progressive = 0;
 static int max_active_lines = 0;
+static size_t max_lines = 0;
+static enum fymd_line_limit_mode line_limit_mode = FYMD_LLM_SCROLL;
+static enum fymd_line_split line_split = FYMD_LLS_BALANCED;
+static size_t line_head = 0;
+static const char* line_separator = NULL;
 static int table_fit_content = 0;
 static const char* style_path = NULL;
 static enum fymd_background forced_bg = FYMD_BG_AUTO;
@@ -400,6 +405,10 @@ enum {
     OPT_STREAM,
     OPT_STREAM_PROGRESSIVE,
     OPT_MAX_ACTIVE_LINES,
+    OPT_MAX_LINES,
+    OPT_LINE_OVERFLOW,
+    OPT_LINE_HEAD,
+    OPT_LINE_SEPARATOR,
     OPT_STREAM_CHUNK,
     OPT_STREAM_MODE,
     OPT_STREAM_DELAY,
@@ -455,6 +464,10 @@ static const struct option long_options[] = {
     { "stream",             no_argument,       NULL, OPT_STREAM },
     { "stream-progressive", no_argument,       NULL, OPT_STREAM_PROGRESSIVE },
     { "max-active-lines",   required_argument, NULL, OPT_MAX_ACTIVE_LINES },
+    { "max-lines",          required_argument, NULL, OPT_MAX_LINES },
+    { "line-overflow",      required_argument, NULL, OPT_LINE_OVERFLOW },
+    { "line-head",          required_argument, NULL, OPT_LINE_HEAD },
+    { "line-separator",     required_argument, NULL, OPT_LINE_SEPARATOR },
     { "stream-chunk",       required_argument, NULL, OPT_STREAM_CHUNK },
     { "stream-mode",        required_argument, NULL, OPT_STREAM_MODE },
     { "stream-delay",       required_argument, NULL, OPT_STREAM_DELAY },
@@ -526,6 +539,10 @@ usage(void)
         "      --stream         Render incrementally (push mode)\n"
         "      --stream-progressive  Live progressive render; updates the active region in place\n"
         "      --max-active-lines=N  Cap the streaming active region to N input lines (0 = unlimited)\n"
+        "      --max-lines=N    Cap output to N rendered rows (0 = unlimited)\n"
+        "      --line-overflow=MODE  Overflow policy: scroll (default) or head-tail\n"
+        "      --line-head=N|balanced  Head/tail allocation for head-tail mode\n"
+        "      --line-separator=FORMAT  Omission row with one %%d conversion\n"
         "      --stream-mode=MODE  How input is chopped into pushes: whole, line, byte (implies --stream)\n"
         "      --stream-chunk=N    Push N bytes at a time (implies --stream)\n"
         "      --stream-delay=MS   Pause MS milliseconds between pushes (watch the reconstruction)\n"
@@ -651,6 +668,53 @@ parse_args(int argc, char** argv)
                 break;
             }
 
+            case OPT_MAX_LINES: {
+                char* end = NULL;
+                unsigned long n = strtoul(optarg, &end, 10);
+                if(optarg[0] == '-' || end == optarg || *end != '\0' ||
+                   (unsigned long)(size_t)n != n) {
+                    fprintf(stderr, "Invalid --max-lines value: %s\n", optarg);
+                    exit(1);
+                }
+                max_lines = (size_t) n;
+                break;
+            }
+
+            case OPT_LINE_OVERFLOW:
+                if(strcmp(optarg, "scroll") == 0)
+                    line_limit_mode = FYMD_LLM_SCROLL;
+                else if(strcmp(optarg, "head-tail") == 0)
+                    line_limit_mode = FYMD_LLM_HEAD_TAIL;
+                else {
+                    fprintf(stderr, "Invalid --line-overflow value: %s "
+                            "(use scroll or head-tail)\n", optarg);
+                    exit(1);
+                }
+                break;
+
+            case OPT_LINE_HEAD:
+                line_limit_mode = FYMD_LLM_HEAD_TAIL;
+                if(strcmp(optarg, "balanced") == 0) {
+                    line_split = FYMD_LLS_BALANCED;
+                    line_head = 0;
+                } else {
+                    char* end = NULL;
+                    unsigned long n = strtoul(optarg, &end, 10);
+                    if(optarg[0] == '-' || end == optarg || *end != '\0' ||
+                       (unsigned long)(size_t)n != n) {
+                        fprintf(stderr, "Invalid --line-head value: %s\n", optarg);
+                        exit(1);
+                    }
+                    line_split = FYMD_LLS_HEAD_COUNT;
+                    line_head = (size_t) n;
+                }
+                break;
+
+            case OPT_LINE_SEPARATOR:
+                line_limit_mode = FYMD_LLM_HEAD_TAIL;
+                line_separator = optarg;
+                break;
+
             case OPT_STREAM_CHUNK:
                 stream_chunk = atoi(optarg);
                 if(stream_chunk < 1) {
@@ -752,6 +816,7 @@ main(int argc, char** argv)
     struct fymd_renderer_cfg cfg;
     int ret = 0;
     int use_color;
+    struct fymd_line_limit_opts limit_opts;
 
     parse_args(argc, argv);
 
@@ -796,6 +861,18 @@ main(int argc, char** argv)
     if(r == NULL) {
         fprintf(stderr, "Cannot create renderer (styling%s%s).\n",
                 style_path ? " from " : "", style_path ? style_path : "");
+        exit(1);
+    }
+
+    memset(&limit_opts, 0, sizeof(limit_opts));
+    limit_opts.mode = max_lines ? line_limit_mode : FYMD_LLM_NONE;
+    limit_opts.max_lines = max_lines;
+    limit_opts.split = line_split;
+    limit_opts.head_lines = line_head;
+    limit_opts.separator_format = line_separator;
+    if(fymd_renderer_set_line_limit(r, &limit_opts) != 0) {
+        fprintf(stderr, "Invalid rendered-line limit configuration.\n");
+        fymd_renderer_destroy(r);
         exit(1);
     }
 

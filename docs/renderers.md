@@ -66,6 +66,36 @@ fymd_render_reset(r);                   /* drop stream state to start another */
 fymd_renderer_destroy(r);
 ```
 
+### Rendered-row limits
+
+A renderer can optionally expose a bounded terminal viewport. Configure it
+before one-shot rendering or before the first progressive push:
+
+```c
+struct fymd_line_limit_opts limit = {
+    .mode = FYMD_LLM_HEAD_TAIL,       /* or FYMD_LLM_SCROLL */
+    .max_lines = 20,
+    .split = FYMD_LLS_BALANCED,       /* extra retained row goes to the tail */
+    .separator_format = "... %d lines omitted ...",
+};
+fymd_renderer_set_line_limit(r, &limit);
+```
+
+Rows are counted after wrapping and layout. Short output is unchanged and is
+not padded. Scroll mode retains the newest rows. Head-tail mode reserves one
+row for the separator; `FYMD_LLS_HEAD_COUNT` uses `head_lines` and gives the
+remaining rows to the tail. The separator accepts exactly one `%d` (the number
+of omitted rendered rows) and `%%` for a literal percent sign. Pass `NULL`, use
+`FYMD_LLM_NONE`, or set `max_lines` to zero to disable the viewport.
+
+With progressive updates, the bounded viewport remains mutable (`freeze` is
+zero) so rows can scroll out. Apply updates normally; the final flush replaces
+the active viewport. Call `fymd_render_reset()` before changing the limit of a
+renderer that has started a stream.
+
+The CLI equivalents are `--max-lines`, `--line-overflow=scroll|head-tail`,
+`--line-head=N|balanced`, and `--line-separator=FORMAT`.
+
 ### Config flags (`FYMD_RF_*`)
 
 | Flag                   | Description                                       |

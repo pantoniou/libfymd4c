@@ -8,6 +8,7 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "md4c.h"
@@ -27,6 +28,14 @@
 #define FYMD_VERSION_STRING "0.0.0"
 #endif
 
+/* Growable output buffer for one-shot rendering. */
+struct fymd_buf {
+    char *data;
+    size_t size;
+    size_t asize;
+    int oom;
+};
+
 struct fymd_renderer {
     struct fymd_renderer_cfg cfg;   /* owned copy (string fields strdup'd) */
     MD_ANSI_STYLE *style;           /* built once; freed in destroy */
@@ -34,14 +43,13 @@ struct fymd_renderer {
     unsigned renderer_flags;        /* resolved MD_ANSI_FLAG_* for md_ansi */
     int width;                      /* MD_ANSI_WIDTH_* / columns */
     MD4C_STREAM *stream;            /* lazily created live stream, or NULL */
-};
 
-/* Growable output buffer for one-shot rendering. */
-struct fymd_buf {
-    char *data;
-    size_t size;
-    size_t asize;
-    int oom;
+    struct fymd_line_limit_opts limit;
+    char *limit_separator;
+    struct fymd_buf screen;         /* reconstructed complete progressive screen */
+    struct fymd_buf visible;        /* viewport returned by the previous push */
+    struct fymd_buf viewport;       /* projection scratch / finish result */
+    size_t stream_active_rows;      /* mutable rows in the underlying stream */
 };
 
 static void
@@ -67,6 +75,29 @@ fymd_buf_append(const MD_CHAR *text, MD_SIZE size, void *userdata)
     b->size += size;
 }
 
+static void
+fymd_buf_reset(struct fymd_buf *b)
+{
+    b->size = 0;
+    b->oom = 0;
+}
+
+static void
+fymd_buf_fini(struct fymd_buf *b)
+{
+    free(b->data);
+    memset(b, 0, sizeof(*b));
+}
+
+static int
+fymd_buf_put(struct fymd_buf *b, const char *data, size_t size)
+{
+    if(size == 0)
+        return 0;
+    fymd_buf_append(data, (MD_SIZE) size, b);
+    return b->oom ? -1 : 0;
+}
+
 static char *
 fymd_strdup(const char *s)
 {
@@ -79,6 +110,218 @@ fymd_strdup(const char *s)
     if(d != NULL)
         memcpy(d, s, n);
     return d;
+}
+
+static size_t
+fymd_count_rows(const char *data, size_t size)
+{
+    size_t i, rows = 0;
+    for(i = 0; i < size; i++)
+        if(data[i] == '\n')
+            rows++;
+    if(size > 0 && data[size - 1] != '\n')
+        rows++;
+    return rows;
+}
+
+static size_t
+fymd_after_rows(const char *data, size_t size, size_t rows)
+{
+    size_t i, seen = 0;
+    if(rows == 0)
+        return 0;
+    for(i = 0; i < size; i++)
+        if(data[i] == '\n' && ++seen == rows)
+            return i + 1;
+    return size;
+}
+
+static void
+fymd_drop_trailing_rows(struct fymd_buf *b, size_t rows)
+{
+    size_t pos = b->size, k;
+    for(k = 0; k < rows && pos > 0; k++) {
+        if(pos > 0 && b->data[pos - 1] == '\n')
+            pos--;
+        while(pos > 0 && b->data[pos - 1] != '\n')
+            pos--;
+    }
+    b->size = pos;
+}
+
+/* Validate the deliberately small printf subset accepted for separators. */
+static int
+fymd_separator_valid(const char *fmt)
+{
+    size_t i;
+    int conversions = 0;
+    if(fmt == NULL)
+        return 1;
+    for(i = 0; fmt[i] != '\0'; i++) {
+        if(fmt[i] == '\n' || fmt[i] == '\r')
+            return 0;
+        if(fmt[i] != '%')
+            continue;
+        i++;
+        if(fmt[i] == '%')
+            continue;
+        if(fmt[i] == 'd') {
+            conversions++;
+            continue;
+        }
+        return 0;
+    }
+    return conversions == 1;
+}
+
+static int
+fymd_append_separator(struct fymd_buf *b, const char *fmt, size_t omitted)
+{
+    char number[32];
+    size_t i, start = 0;
+    int n = snprintf(number, sizeof(number), "%zu", omitted);
+    if(n < 0)
+        return -1;
+    for(i = 0; fmt[i] != '\0'; i++) {
+        if(fmt[i] != '%')
+            continue;
+        if(fymd_buf_put(b, fmt + start, i - start) != 0)
+            return -1;
+        i++;
+        if(fmt[i] == '%') {
+            if(fymd_buf_put(b, "%", 1) != 0)
+                return -1;
+        } else {
+            if(fymd_buf_put(b, number, (size_t) n) != 0)
+                return -1;
+        }
+        start = i + 1;
+    }
+    if(fymd_buf_put(b, fmt + start, strlen(fmt + start)) != 0)
+        return -1;
+    return fymd_buf_put(b, "\n", 1);
+}
+
+/* Length of a CSI SGR sequence, or zero. */
+static size_t
+fymd_sgr_len(const char *data, size_t size)
+{
+    size_t i;
+    unsigned char c;
+    if(size < 3 || (unsigned char)data[0] != 0x1b || data[1] != '[')
+        return 0;
+    for(i = 2; i < size; i++) {
+        c = (unsigned char)data[i];
+        if(c >= 0x40 && c <= 0x7e)
+            return data[i] == 'm' ? i + 1 : 0;
+    }
+    return 0;
+}
+
+static int
+fymd_sgr_is_reset(const char *seq, size_t size)
+{
+    size_t i;
+    for(i = 2; i + 1 < size; i++)
+        if(seq[i] != '0' && seq[i] != ';')
+            return 0;
+    return 1;
+}
+
+static int
+fymd_has_sgr(const char *data, size_t size)
+{
+    size_t i;
+    for(i = 0; i < size; i++)
+        if(fymd_sgr_len(data + i, size - i) > 0)
+            return 1;
+    return 0;
+}
+
+/* Make a sliced row range terminal-independent. Start from a known neutral
+ * state, then replay the SGR history following the last full reset before the
+ * slice. This handles generated styling and input retained under SGR_SAFE. */
+static int
+fymd_append_sgr_replay(struct fymd_buf *out, const char *data, size_t size)
+{
+    size_t i, n, replay = 0;
+    int found = 0;
+    for(i = 0; i < size; ) {
+        n = fymd_sgr_len(data + i, size - i);
+        if(n > 0) {
+            found = 1;
+            if(fymd_sgr_is_reset(data + i, n))
+                replay = i + n;
+            i += n;
+        } else {
+            i++;
+        }
+    }
+    if(!found)
+        return 0;
+    if(fymd_buf_put(out, "\x1b[0m", 4) != 0)
+        return -1;
+    for(i = replay; i < size; ) {
+        n = fymd_sgr_len(data + i, size - i);
+        if(n > 0) {
+            if(fymd_buf_put(out, data + i, n) != 0)
+                return -1;
+            i += n;
+        } else {
+            i++;
+        }
+    }
+    return 0;
+}
+
+static int
+fymd_project(struct fymd_renderer *r, const char *data, size_t size,
+             struct fymd_buf *out)
+{
+    size_t rows, head, tail, off;
+
+    fymd_buf_reset(out);
+    rows = fymd_count_rows(data, size);
+    if(r->limit.mode == FYMD_LLM_NONE || r->limit.max_lines == 0 ||
+       rows <= r->limit.max_lines)
+        return fymd_buf_put(out, data, size);
+
+    if(r->limit.mode == FYMD_LLM_SCROLL) {
+        off = fymd_after_rows(data, size, rows - r->limit.max_lines);
+        if(fymd_append_sgr_replay(out, data, off) != 0)
+            return -1;
+        return fymd_buf_put(out, data + off, size - off);
+    }
+
+    if(r->limit.split == FYMD_LLS_BALANCED)
+        head = (r->limit.max_lines - 1) / 2;
+    else
+        head = r->limit.head_lines;
+    tail = r->limit.max_lines - head - 1;
+
+    off = fymd_after_rows(data, size, head);
+    if(fymd_buf_put(out, data, off) != 0)
+        return -1;
+    /* Neutralize styling opened in the retained head before the separator. */
+    if((fymd_has_sgr(data, off) && fymd_buf_put(out, "\x1b[0m", 4) != 0) ||
+       fymd_append_separator(out, r->limit_separator, rows - head - tail) != 0)
+        return -1;
+    off = fymd_after_rows(data, size, rows - tail);
+    if(fymd_append_sgr_replay(out, data, off) != 0)
+        return -1;
+    return fymd_buf_put(out, data + off, size - off);
+}
+
+static size_t
+fymd_common_row_prefix(const struct fymd_buf *a, const struct fymd_buf *b)
+{
+    size_t i = 0, start = 0, n = a->size < b->size ? a->size : b->size;
+    while(i < n && a->data[i] == b->data[i]) {
+        if(a->data[i] == '\n')
+            start = i + 1;
+        i++;
+    }
+    return start;
 }
 
 static MD_STYLE_BG
@@ -185,6 +428,10 @@ fymd_renderer_destroy(struct fymd_renderer *r)
     free((void *) r->cfg.style);
     free((void *) r->cfg.style_path);
     free((void *) r->cfg.code_theme);
+    free(r->limit_separator);
+    fymd_buf_fini(&r->screen);
+    fymd_buf_fini(&r->visible);
+    fymd_buf_fini(&r->viewport);
     free(r);
 }
 
@@ -192,6 +439,52 @@ const struct fymd_renderer_cfg *
 fymd_renderer_get_cfg(struct fymd_renderer *r)
 {
     return r ? &r->cfg : NULL;
+}
+
+int
+fymd_renderer_set_line_limit(struct fymd_renderer *r,
+        const struct fymd_line_limit_opts *opts)
+{
+    static const char default_separator[] = "... %d lines omitted ...";
+    struct fymd_line_limit_opts next;
+    char *separator = NULL;
+
+    if(r == NULL || r->stream != NULL)
+        return -1;
+    memset(&next, 0, sizeof(next));
+    if(opts == NULL || opts->mode == FYMD_LLM_NONE || opts->max_lines == 0)
+        goto apply;
+    next = *opts;
+    if(next.mode != FYMD_LLM_SCROLL && next.mode != FYMD_LLM_HEAD_TAIL)
+        return -1;
+    if(next.mode == FYMD_LLM_HEAD_TAIL) {
+        const char *fmt = next.separator_format ? next.separator_format : default_separator;
+        if(next.max_lines < 3 ||
+           (next.split != FYMD_LLS_HEAD_COUNT && next.split != FYMD_LLS_BALANCED) ||
+           (next.split == FYMD_LLS_HEAD_COUNT &&
+            (next.head_lines == 0 || next.head_lines > next.max_lines - 2)) ||
+           !fymd_separator_valid(fmt))
+            return -1;
+        separator = fymd_strdup(fmt);
+        if(separator == NULL)
+            return -1;
+        next.separator_format = separator;
+    } else {
+        next.split = FYMD_LLS_HEAD_COUNT;
+        next.head_lines = 0;
+        next.separator_format = NULL;
+    }
+
+apply:
+    free(r->limit_separator);
+    r->limit_separator = separator;
+    r->limit = next;
+    r->limit.separator_format = separator;
+    fymd_buf_reset(&r->screen);
+    fymd_buf_reset(&r->visible);
+    fymd_buf_reset(&r->viewport);
+    r->stream_active_rows = 0;
+    return 0;
 }
 
 int
@@ -210,6 +503,17 @@ fymd_render(struct fymd_renderer *r, const char *md, size_t len,
     if(rc != 0 || b.oom) {
         free(b.data);
         return -1;
+    }
+    if(r->limit.mode != FYMD_LLM_NONE && r->limit.max_lines > 0) {
+        struct fymd_buf limited;
+        memset(&limited, 0, sizeof(limited));
+        if(fymd_project(r, b.data, b.size, &limited) != 0) {
+            free(b.data);
+            free(limited.data);
+            return -1;
+        }
+        free(b.data);
+        b = limited;
     }
     if(b.data == NULL) {
         /* Empty document: still hand back a valid empty string. */
@@ -254,6 +558,8 @@ fymd_render_push(struct fymd_renderer *r, const char *chunk, size_t len,
                  struct fymd_update *upd)
 {
     MD4C_STREAM_UPDATE u;
+    size_t common;
+    struct fymd_buf swap;
 
     if(r == NULL || upd == NULL)
         return -1;
@@ -268,6 +574,31 @@ fymd_render_push(struct fymd_renderer *r, const char *chunk, size_t len,
 
     if(md4c_stream_render(r->stream, chunk, len, &u) != 0)
         return -1;
+
+    if(r->limit.mode != FYMD_LLM_NONE && r->limit.max_lines > 0) {
+        fymd_drop_trailing_rows(&r->screen, u.backtrack);
+        if(fymd_buf_put(&r->screen, u.content, u.content_len) != 0 ||
+           fymd_project(r, r->screen.data, r->screen.size, &r->viewport) != 0)
+            return -1;
+
+        common = fymd_common_row_prefix(&r->visible, &r->viewport);
+        upd->backtrack = fymd_count_rows(r->visible.data + common,
+                                         r->visible.size - common);
+
+        swap = r->visible;
+        r->visible = r->viewport;
+        r->viewport = swap;
+        upd->content = r->visible.data ? r->visible.data + common : "";
+        upd->content_len = r->visible.size - common;
+        upd->freeze = 0;
+
+        r->stream_active_rows -= u.backtrack > r->stream_active_rows ?
+                                 r->stream_active_rows : u.backtrack;
+        r->stream_active_rows += fymd_count_rows(u.content, u.content_len);
+        r->stream_active_rows = u.freeze >= r->stream_active_rows ? 0 :
+                                r->stream_active_rows - u.freeze;
+        return 0;
+    }
 
     upd->backtrack = u.backtrack;
     upd->content = u.content;
@@ -296,6 +627,15 @@ fymd_render_finish(struct fymd_renderer *r, const char **out, size_t *out_len)
     if(md4c_stream_finish(r->stream, &o, &olen) != 0)
         return -1;
 
+    if(r->limit.mode != FYMD_LLM_NONE && r->limit.max_lines > 0) {
+        fymd_drop_trailing_rows(&r->screen, r->stream_active_rows);
+        if(fymd_buf_put(&r->screen, o, olen) != 0 ||
+           fymd_project(r, r->screen.data, r->screen.size, &r->viewport) != 0)
+            return -1;
+        o = r->viewport.data ? r->viewport.data : "";
+        olen = r->viewport.size;
+    }
+
     /* Keep the stream alive: `o` points into its memory, valid until the next
      * call. fymd_render_reset()/destroy tears it down. */
     *out = o;
@@ -311,6 +651,10 @@ fymd_render_reset(struct fymd_renderer *r)
         return;
     md4c_stream_destroy(r->stream);
     r->stream = NULL;
+    fymd_buf_reset(&r->screen);
+    fymd_buf_reset(&r->visible);
+    fymd_buf_reset(&r->viewport);
+    r->stream_active_rows = 0;
 }
 
 void
