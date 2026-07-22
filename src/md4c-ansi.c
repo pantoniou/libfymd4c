@@ -188,6 +188,11 @@ struct MD_ANSI_tag {
     /* Fenced-code syntax highlighting via libfyts: when active, the code text is
      * buffered between block enter/leave and handed to fyts on leave. */
     int code_highlight;     /* highlighting the current code block */
+    int code_on_pending;    /* code_block.on deferred until the first body
+                               byte, so an EMPTY body emits no stray on/off
+                               pair (it breaks streamed-vs-one-shot byte
+                               identity when a continuation render starts at
+                               the closing fence) */
     char code_lang[64];     /* info string (language) of the current code block */
     MD_SIZE code_lang_size;
     char* code_buf;         /* buffered raw code text */
@@ -1694,6 +1699,11 @@ emit_plain_code(MD_ANSI* r)
     int avail = (r->wrap_cols > 0)
                 ? r->wrap_cols - ansi_indent_width(r) - prefixw - DOC_MARGIN : 0;
     if(r->wrap_cols > 0 && avail < 1) avail = 1;
+    /* An empty body must emit nothing at all: a bare on/off style pair is
+     * zero-width, but it breaks the streamed-equals-one-shot byte identity
+     * when a continuation render starts directly at the closing fence. */
+    if(r->code_size == 0)
+        return;
     render_ansi(r, r->style->code_block.on);
     for(i = 0; i <= r->code_size; i++) {
         if(i == r->code_size || r->code_buf[i] == '\n') {
@@ -1999,7 +2009,7 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 }
             }
             if(!r->code_highlight)
-                render_ansi(r, r->style->code_block.on);
+                r->code_on_pending = 1;   /* emitted at the first body byte */
             break;
 
         case MD_BLOCK_HTML:
@@ -2118,7 +2128,9 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 }
                 r->code_highlight = 0;
             } else {
-                render_ansi(r, r->style->code_block.off);
+                if(!r->code_on_pending)
+                    render_ansi(r, r->style->code_block.off);
+                r->code_on_pending = 0;
             }
             if((r->flags & MD_ANSI_FLAG_CODE_META) && r->n_code_blocks < r->code_blocks_cap) {
                 r->code_blocks[r->n_code_blocks].end = r->output_offset;
@@ -2337,6 +2349,10 @@ text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdat
                 /* Inside code block: the parser sends each line and its \n
                  * as separate callbacks. We use need_indent to track when
                  * we need to emit the indent prefix at line start. */
+                if(r->code_on_pending) {
+                    render_ansi(r, r->style->code_block.on);
+                    r->code_on_pending = 0;
+                }
                 if(size == 1 && text[0] == '\n') {
                     render_newline(r);
                     r->need_indent = 1;

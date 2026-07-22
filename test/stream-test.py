@@ -45,7 +45,7 @@ WIDTHS = [40, 60, 80, 120]
 
 
 def run(program, text, args):
-    p = subprocess.run([program, "-t", "ansi", "--color=off"] + args,
+    p = subprocess.run([program, "-t", "ansi"] + args,
                        input=text.encode("utf-8"),
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if p.returncode != 0:
@@ -66,20 +66,28 @@ def main():
     # both the append-only push mode (--stream) and the progressive line-diff
     # mode (--stream-progressive, whose updates are applied to a virtual screen
     # by the CLI and the final screen printed).
+    # Both colour modes: with --color=on the progressive updates carry an SGR
+    # carry-over after the final newline, which exercises the cursor-row
+    # residue handling in the CLI's virtual-screen replay (a row-accounting
+    # bug there staircases fenced blocks); --color=off has no residue and
+    # cannot catch it.
     for name, text in FIXTURES.items():
-        for w in WIDTHS:
-            base = run(opts.program, text, ["--width=%d" % w])
-            for chunk in CHUNKS:
-                for mode in ("--stream", "--stream-progressive"):
-                    got = run(opts.program, text,
-                              ["--width=%d" % w, mode, "--stream-chunk=%d" % chunk])
-                    if got == base:
-                        passed += 1
-                    else:
-                        failed += 1
-                        print("FAIL %s %s width=%d chunk=%d" % (name, mode, w, chunk))
-                        print("  one-shot: %r" % base[:200])
-                        print("  stream:   %r" % got[:200])
+        for color in ("--color=off", "--color=on"):
+            for w in WIDTHS:
+                base = run(opts.program, text, ["--width=%d" % w, color])
+                for chunk in CHUNKS:
+                    for mode in ("--stream", "--stream-progressive"):
+                        got = run(opts.program, text,
+                                  ["--width=%d" % w, color, mode,
+                                   "--stream-chunk=%d" % chunk])
+                        if got == base:
+                            passed += 1
+                        else:
+                            failed += 1
+                            print("FAIL %s %s %s width=%d chunk=%d"
+                                  % (name, mode, color, w, chunk))
+                            print("  one-shot: %r" % base[:200])
+                            print("  stream:   %r" % got[:200])
 
     # Heal smoke test: a stream cut off mid-emphasis. With --heal the trailing
     # marker is closed (bold applied, no literal "**" left); without it the
@@ -88,8 +96,10 @@ def main():
     # since md_heal is a whole-document transform.)
     truncated = "a paragraph then some **bold that never closes"
     for mode in ("--stream", "--stream-progressive"):
-        healed = run(opts.program, truncated, ["--width=80", mode, "--stream-chunk=5", "--heal"])
-        plain = run(opts.program, truncated, ["--width=80", mode, "--stream-chunk=5"])
+        healed = run(opts.program, truncated,
+                     ["--width=80", "--color=off", mode, "--stream-chunk=5", "--heal"])
+        plain = run(opts.program, truncated,
+                    ["--width=80", "--color=off", mode, "--stream-chunk=5"])
         if b"**" in healed:
             failed += 1
             print("FAIL heal smoke (%s): trailing ** not healed: %r" % (mode, healed))

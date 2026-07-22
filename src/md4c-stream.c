@@ -126,6 +126,7 @@ struct MD4C_STREAM {
      * markup languages (markdown/rst) have backward dependencies and are never
      * committed mid-fence (see next_sync_offset). */
     int in_code_body;
+    int code_on_committed; /* plain code_block.on already in committed output */
     char code_lang[64];
     size_t code_lang_size;
     char code_fence_ch;      /* fence delimiter of the open fence: '`' or '~' */
@@ -252,9 +253,10 @@ lang_progressive_unsafe(const char* lang, size_t n)
  * continuation state after the anchor advances. */
 static int
 fence_context(const char* data, size_t offset, char* lang_out, size_t lang_cap,
-              size_t* lang_len, char* ch_out, size_t* len_out)
+              size_t* lang_len, char* ch_out, size_t* len_out,
+              size_t* body_out)
 {
-    size_t i = 0, line_start = 0, fence_len = 0, run;
+    size_t i = 0, line_start = 0, fence_len = 0, run, body = 0;
     int in_fence = 0, fence_col0 = 0;
     char fence_ch = 0;
 
@@ -286,6 +288,7 @@ fence_context(const char* data, size_t offset, char* lang_out, size_t lang_cap,
                 }
                 lang_out[n] = '\0';
                 if(lang_len) *lang_len = n;
+                body = i + 1;   /* the body starts after the opener line */
             }
             line_start = i + 1;
         }
@@ -293,11 +296,32 @@ fence_context(const char* data, size_t offset, char* lang_out, size_t lang_cap,
     }
     if(ch_out) *ch_out = fence_ch;
     if(len_out) *len_out = fence_len;
+    if(body_out) *body_out = body;
     /* Continuation state only holds for a column-0 (top-level) fence: the
      * synthetic opener is rendered at column 0, so an indented fence (inside a
      * list/quote) would re-render with the wrong context. Anchors never land
      * inside indented fences (next_sync_offset does not commit there). */
     return in_fence && fence_col0;
+}
+
+/* Mirror of the renderer's syntax-highlighting decision for the current
+ * fence continuation: highlighted fences take the fyts path and never emit
+ * the plain code_block.on/.off pair. */
+static int
+stream_code_highlighted(MD4C_STREAM* s)
+{
+#ifdef MD4C_WITH_FYTS
+    char buf[64];
+    if(s->style != NULL && s->style->code_enabled && s->code_lang_size > 0
+       && s->code_lang_size < sizeof(buf)) {
+        memcpy(buf, s->code_lang, s->code_lang_size);
+        buf[s->code_lang_size] = '\0';
+        return fyts_language_supported(buf);
+    }
+#else
+    (void) s;
+#endif
+    return 0;
 }
 
 /* Render `input_size` bytes of input into `buf`. When `heal` is set, the
@@ -365,6 +389,33 @@ stream_render(MD4C_STREAM* s, STREAM_BUF* buf, const char* input,
             p++;
             memmove(buf->data, buf->data + p, buf->size - p);
             buf->size -= p;
+        }
+        /* The committed stream already carries code_block.on (emitted with
+         * the FIRST committed body line), so the synthetic block must not
+         * repeat it: strip the duplicate .on when the render begins with
+         * one. A closing segment whose synthetic body is EMPTY emits
+         * neither .on nor .off, but the one-shot render closes the still-
+         * open style ahead of the bottom rule -- prepend the .off there.
+         * Either way the streamed bytes stay identical to the one-shot.
+         * Only the PLAIN colour path emits the pair at all: skip under
+         * NO_COLOR and when the fence is fyts-highlighted. */
+        if(s->code_on_committed && s->style != NULL
+           && !(s->renderer_flags & MD_ANSI_FLAG_NO_COLOR)
+           && !stream_code_highlighted(s)) {
+            const char* on = s->style->code_block.on;
+            const char* off = s->style->code_block.off;
+            size_t onlen = on != NULL ? strlen(on) : 0;
+            size_t offlen = off != NULL ? strlen(off) : 0;
+            if(onlen > 0 && buf->size >= onlen
+               && memcmp(buf->data, on, onlen) == 0) {
+                memmove(buf->data, buf->data + onlen, buf->size - onlen);
+                buf->size -= onlen;
+            } else if(offlen > 0 && buf->size > 0) {
+                if(sbuf_append(buf, off, offlen) != 0)   /* grow, then rotate */
+                    return -1;
+                memmove(buf->data + offlen, buf->data, buf->size - offlen);
+                memcpy(buf->data, off, offlen);
+            }
         }
     }
     return 0;
@@ -652,10 +703,17 @@ stream_needs_sep(MD4C_STREAM* s)
 static void
 stream_sync_fence(MD4C_STREAM* s)
 {
+    size_t body = 0;
     s->in_code_body = fence_context(s->accum.data, s->anchor,
                                     s->code_lang, sizeof(s->code_lang),
                                     &s->code_lang_size,
-                                    &s->code_fence_ch, &s->code_fence_len);
+                                    &s->code_fence_ch, &s->code_fence_len,
+                                    &body);
+    /* Once the anchor is past the first body line, the committed stream
+     * already carries the plain code_block.on (it was emitted with the
+     * first committed body line); later continuation renders must strip
+     * the one they re-open, or the streamed bytes diverge per line. */
+    s->code_on_committed = s->in_code_body && s->anchor > body;
 }
 
 /* Build the returned slice in s->out: an inter-block "\n" separator (when some
@@ -840,6 +898,23 @@ common_line_prefix(const STREAM_BUF* a, const STREAM_BUF* b)
     return line_start;
 }
 
+/* Do these bytes consist solely of complete SGR sequences (ESC '[' .. 'm')? */
+static int
+region_is_sgr_only(const char* p, size_t n)
+{
+    size_t i = 0, j;
+    while(i < n) {
+        if(p[i] != 0x1b || i + 1 >= n || p[i + 1] != '[')
+            return 0;
+        j = i + 2;
+        while(j < n && (p[j] == ';' || (p[j] >= '0' && p[j] <= '9'))) j++;
+        if(j >= n || p[j] != 'm')
+            return 0;
+        i = j + 1;
+    }
+    return 1;
+}
+
 int
 md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
                    MD4C_STREAM_UPDATE* upd)
@@ -873,6 +948,20 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
         return -1;
     if(sbuf_append(&s->tail, s->seg.data, s->seg.size) != 0)
         return -1;
+
+    /* Trim a trailing escape-only partial line (the SGR carry-over the
+     * renderer leaves after the final newline). It is zero-width -- state
+     * ahead of glyphs that do not exist yet -- and every update re-renders
+     * its rows from a fresh SGR state anyway. Left in, it dangles on the
+     * cursor row where a backtrack of 0 never erases it, and a byte-exact
+     * replay of the stream doubles it. */
+    {
+        size_t nl = s->tail.size;
+        while(nl > 0 && s->tail.data[nl - 1] != '\n') nl--;
+        if(nl < s->tail.size
+           && region_is_sgr_only(s->tail.data + nl, s->tail.size - nl))
+            s->tail.size = nl;
+    }
 
     /* Diff against what is currently displayed: keep the common leading lines,
      * backtrack over the rest, and re-emit from the first changed line. */
@@ -938,7 +1027,11 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
         }
     }
 
-    /* Remember the now-displayed active region (minus the frozen prefix). */
+    /* Remember the now-displayed active region (minus the frozen prefix).
+     * freeze_bytes was measured against the un-trimmed render, so a freeze
+     * that reaches the end of the tail may exceed the trimmed size. */
+    if(freeze_bytes > s->tail.size)
+        freeze_bytes = s->tail.size;
     sbuf_reset(&s->shown);
     if(sbuf_append(&s->shown, s->tail.data + freeze_bytes,
                    s->tail.size - freeze_bytes) != 0)
