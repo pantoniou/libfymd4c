@@ -258,6 +258,15 @@ process_ansi_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live)
             fflush(out);
         } else {
             size_t pos = scr.size, k;
+            /* Cursor-row residue after the last '\n' (the SGR carry-over
+             * emitted with colour on, or a partial row) is erased in
+             * ADDITION to the backtracked rows: the live path's CUU moves
+             * over full rows only and the erase-down then takes the cursor
+             * row too. Counting it as one of the b rows under-drops and
+             * staircases fenced blocks. With b == 0 nothing is erased at
+             * all, so the residue stays and content continues after it. */
+            if(b > 0)
+                while(pos > 0 && scr.data[pos - 1] != '\n') pos--;
             for(k = 0; k < b && pos > 0; k++) {
                 pos--;
                 while(pos > 0 && scr.data[pos - 1] != '\n') pos--;
@@ -292,6 +301,9 @@ process_ansi_stream(FILE* in, FILE* out, struct fymd_renderer* r, int live)
             fflush(out);
         } else {
             size_t pos = scr.size, k;
+            /* same cursor-row residue rule as the push loop above */
+            if(active_rows > 0)
+                while(pos > 0 && scr.data[pos - 1] != '\n') pos--;
             for(k = 0; k < active_rows && pos > 0; k++) {
                 pos--;
                 while(pos > 0 && scr.data[pos - 1] != '\n') pos--;
