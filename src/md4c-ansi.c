@@ -2558,10 +2558,14 @@ emit_raw_code(MD_ANSI* r, int styled)
             len = ansi_clip_bytes(r->code_buf + start, len, avail);
         if(len > 0)
             render_verbatim(r, r->code_buf + start, len);
-        render_newline(r);
         start = end < r->code_size ? end + 1 : end;
+        /* close the style BEFORE the final newline: closing after it left
+         * an escape-only line -- a blank row -- above the footer rule */
+        if(styled && start >= r->code_size)
+            render_ansi(r, r->style->code_block.off);
+        render_newline(r);
     }
-    if(styled)
+    if(styled && r->code_size == 0)
         render_ansi(r, r->style->code_block.off);
 }
 

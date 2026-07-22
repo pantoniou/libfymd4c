@@ -153,6 +153,54 @@ main(void)
         fymd_renderer_destroy(themed);
     }
 
+    /* With color ON, the styled block must not contain an escape-only row:
+     * the code style used to close AFTER the last body newline, leaving a
+     * blank "\e[22m" line between the body and the footer rule. */
+    {
+        struct fymd_renderer_cfg color_cfg;
+        struct fymd_renderer *cr;
+        char *colored = NULL;
+        size_t colored_len = 0, i, start;
+
+        memset(&color_cfg, 0, sizeof(color_cfg));
+        color_cfg.width = 40;
+        cr = fymd_renderer_create(&color_cfg);
+        memset(&opts, 0, sizeof(opts));
+        opts.language = "text";
+        opts.flags = FYMD_FBF_STYLE;
+        if(cr == NULL ||
+           fymd_render_fenced_block(cr, "a\nb", 3, &opts,
+                                    &colored, &colored_len) != 0) {
+            failed = 1;
+        } else {
+            for(i = 0, start = 0; i < colored_len; i++) {
+                if(colored[i] != '\n')
+                    continue;
+                /* a row must contain at least one byte outside escapes */
+                {
+                    size_t j = start;
+                    int visible = 0, esc = 0;
+                    while(j < i) {
+                        char c = colored[j];
+                        if(c == '\033') esc = 1;
+                        else if(esc && ((c >= 'a' && c <= 'z') ||
+                                        (c >= 'A' && c <= 'Z'))) esc = 0;
+                        else if(!esc) visible = 1;
+                        j++;
+                    }
+                    if(!visible && i > start) {
+                        fprintf(stderr, "escape-only row at offset %zu\n",
+                                start);
+                        failed = 1;
+                    }
+                }
+                start = i + 1;
+            }
+        }
+        fymd_free(colored);
+        fymd_renderer_destroy(cr);
+    }
+
     fymd_free(bare);
     fymd_free(styled);
     fymd_free(highlighted);
