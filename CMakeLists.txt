@@ -32,7 +32,7 @@ endif()
 
 
 if(CMAKE_C_COMPILER_ID MATCHES GNU|Clang)
-    add_compile_options(-Wall -Wextra -Wsign-compare -Wshadow)
+    add_compile_options(-Wall -Wextra -Wsign-compare)
 
     # Build against the newest C standard the compiler supports, mirroring
     # libfyaml: gnu2x -> c2x -> gnu11.
