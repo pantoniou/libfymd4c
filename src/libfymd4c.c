@@ -571,9 +571,10 @@ apply:
     return 0;
 }
 
-int
-fymd_render(struct fymd_renderer *r, const char *md, size_t len,
-            char **out, size_t *out_len)
+static int
+fymd_render_(struct fymd_renderer *r, const char *md, size_t len,
+             fymd_margin_fn margin_fn, void *margin_userdata,
+             char **out, size_t *out_len)
 {
     struct fymd_buf b;
     int rc;
@@ -582,8 +583,9 @@ fymd_render(struct fymd_renderer *r, const char *md, size_t len,
         return -1;
 
     memset(&b, 0, sizeof(b));
-    rc = md_ansi_ex_styled(md, (MD_SIZE) len, fymd_buf_append, &b,
-                           r->parser_flags, r->renderer_flags, r->width, r->style);
+    rc = md_ansi_ex_styled_margins(md, (MD_SIZE) len, fymd_buf_append, &b,
+                           r->parser_flags, r->renderer_flags, r->width, r->style,
+                           margin_fn, margin_userdata);
     if(rc != 0 || b.oom) {
         free(b.data);
         return -1;
@@ -611,6 +613,21 @@ fymd_render(struct fymd_renderer *r, const char *md, size_t len,
     if(out_len != NULL)
         *out_len = b.size;
     return 0;
+}
+
+int
+fymd_render(struct fymd_renderer *r, const char *md, size_t len,
+            char **out, size_t *out_len)
+{
+    return fymd_render_(r, md, len, NULL, NULL, out, out_len);
+}
+
+int
+fymd_render_with_margins(struct fymd_renderer *r,
+        const char *md, size_t len, fymd_margin_fn margin_fn,
+        void *margin_userdata, char **out, size_t *out_len)
+{
+    return fymd_render_(r, md, len, margin_fn, margin_userdata, out, out_len);
 }
 
 char *

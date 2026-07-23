@@ -148,6 +148,9 @@ struct MD_ANSI_tag {
     int code_clip;          /* max code-content columns per line; 0 = no clip */
     int li_opened;          /* just opened a list item (bullet already printed) */
     int line_dirty;         /* content emitted on the current line, no newline yet */
+    MD_ANSI_MARGIN_FN margin_fn;
+    void* margin_userdata;
+    size_t output_row;
 
     /* Stack of open lists (UL/OL), one entry per nesting level, so a nested
      * list's marker type and counter don't leak from its parent. */
@@ -432,12 +435,23 @@ render_ansi(MD_ANSI* r, const char* code)
 
 /* Emit the per-line indent chrome (document margin + quote/alert/list). */
 static void
+render_document_margin(MD_ANSI* r)
+{
+    const char* margin = r->margin_fn
+                       ? r->margin_fn(r->margin_userdata, r->output_row) : NULL;
+    int i;
+    if(margin != NULL)
+        RENDER_VERBATIM(r, margin);
+    else
+        for(i = 0; i < DOC_MARGIN; i++)
+            RENDER_VERBATIM(r, " ");
+}
+
+static void
 render_indent_chrome(MD_ANSI* r)
 {
     int i;
-    /* Global document left margin, applied to every line (like glow). */
-    for(i = 0; i < DOC_MARGIN; i++)
-        RENDER_VERBATIM(r, " ");
+    render_document_margin(r);
     for(i = 0; i < r->quote_depth; i++) {
         render_ansi(r, r->style->blockquote.on);
         RENDER_VERBATIM(r, r->style->blockquote_bar);
@@ -506,7 +520,8 @@ flush_wrapped(MD_ANSI* r)
             if(alen > 0)
                 out_direct(r, "\x1b[0m", 4);        /* close before the newline */
             out_direct(r, "\n", 1);
-            out_direct(r, r->indent_buf, r->indent_len);  /* replay prefix */
+            r->output_row++;
+            render_indent(r);
             if(alen > 0)
                 out_direct(r, active, alen);        /* re-apply the open style */
         }
@@ -514,6 +529,7 @@ flush_wrapped(MD_ANSI* r)
             out_direct(r, r->lbuf + lines[k].start, lines[k].len);
     }
     out_direct(r, "\n", 1);
+    r->output_row++;
 
     free(lines);
     r->lsize = 0;
@@ -525,8 +541,10 @@ render_newline(MD_ANSI* r)
 {
     if(r->wrap_cols > 0 && !r->wrap_suspend && !r->in_code_block && r->line_open)
         flush_wrapped(r);
-    else
+    else {
         out_direct(r, "\n", 1);
+        r->output_row++;
+    }
 }
 
 /* Render a blank separator line. Inside a blockquote the quote bar(s) are kept
@@ -537,8 +555,7 @@ render_separator(MD_ANSI* r)
     if(r->quote_depth > 0) {
         int i, saved = r->wrap_suspend;
         r->wrap_suspend = 1;             /* emit the bars straight to output */
-        for(i = 0; i < DOC_MARGIN; i++)
-            RENDER_VERBATIM(r, " ");
+        render_document_margin(r);
         for(i = 0; i < r->quote_depth; i++) {
             render_ansi(r, r->style->blockquote.on);
             RENDER_VERBATIM(r, r->style->blockquote_bar);
@@ -2432,6 +2449,17 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
                   void* userdata, unsigned parser_flags, unsigned renderer_flags,
                   int width, const struct MD_ANSI_STYLE* style)
 {
+    return md_ansi_ex_styled_margins(input, input_size, process_output,
+            userdata, parser_flags, renderer_flags, width, style, NULL, NULL);
+}
+
+int
+md_ansi_ex_styled_margins(const MD_CHAR* input, MD_SIZE input_size,
+                  void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
+                  void* userdata, unsigned parser_flags, unsigned renderer_flags,
+                  int width, const struct MD_ANSI_STYLE* style,
+                  MD_ANSI_MARGIN_FN margin_fn, void* margin_userdata)
+{
     MD_ANSI render;
     MD_PARSER parser;
     MD_ANSI_STYLE* owned_style = NULL;
@@ -2444,9 +2472,10 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
             free(hbuf.data);
             return -1;
         }
-        ret = md_ansi_ex_styled(hbuf.data, hbuf.size, process_output, userdata,
+        ret = md_ansi_ex_styled_margins(hbuf.data, hbuf.size,
+                                process_output, userdata,
                                 parser_flags, renderer_flags & ~MD_ANSI_FLAG_HEAL,
-                                width, style);
+                                width, style, margin_fn, margin_userdata);
         free(hbuf.data);
         return ret;
     }
@@ -2466,6 +2495,8 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
     render.userdata = userdata;
     render.flags = renderer_flags;
     render.table_width = width;
+    render.margin_fn = margin_fn;
+    render.margin_userdata = margin_userdata;
     if(style == NULL) {
         owned_style = md_ansi_style_create(NULL, 0, NULL);
         if(owned_style == NULL)

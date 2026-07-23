@@ -170,6 +170,12 @@ struct fymd_update {
     size_t freeze;
 };
 
+/* Optional two-cell document-margin override for a one-shot render. Called
+ * before each physical output row is laid out, including wrapped continuation
+ * rows. Return a borrowed SGR-capable string occupying exactly two terminal
+ * cells, or NULL for the normal two-space margin. */
+typedef const char *(*fymd_margin_fn)(void *userdata, size_t row);
+
 /* Create a renderer. Pass NULL cfg for all defaults. Returns NULL on bad
  * config (e.g. unparseable style) or allocation failure. */
 struct fymd_renderer *fymd_renderer_create(const struct fymd_renderer_cfg *cfg) FYMD_EXPORT;
@@ -206,6 +212,13 @@ int fymd_renderer_set_line_limit(struct fymd_renderer *r,
  * *out_len its length (excluding the NUL). Returns 0 on success, -1 on error. */
 int fymd_render(struct fymd_renderer *r, const char *md, size_t len,
                 char **out, size_t *out_len) FYMD_EXPORT;
+
+/* One-shot render with a per-physical-row document-margin callback. A NULL
+ * callback is exactly equivalent to fymd_render(). The callback is out-of-band:
+ * it does not alter the Markdown source or the renderer's persistent config. */
+int fymd_render_with_margins(struct fymd_renderer *r,
+        const char *md, size_t len, fymd_margin_fn margin_fn,
+        void *margin_userdata, char **out, size_t *out_len) FYMD_EXPORT;
 
 /* Convenience wrapper around fymd_render(): returns a heap-allocated,
  * NUL-terminated string (free with fymd_free()), or NULL on error. */

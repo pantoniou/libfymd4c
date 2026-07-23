@@ -13,10 +13,19 @@ rows(const char *s, size_t n)
     return count + (n > 0 && s[n - 1] != '\n');
 }
 
+static const char *
+margin(void *userdata, size_t row)
+{
+    (void)userdata;
+    return row ? "--" : "@@";
+}
+
 int
 main(void)
 {
     struct fymd_renderer *r = fymd_renderer_create(NULL);
+    struct fymd_renderer_cfg chrome_cfg;
+    struct fymd_renderer *chrome;
     struct fymd_line_limit_opts opts;
     struct fymd_update upd;
     char *out = NULL;
@@ -33,6 +42,20 @@ main(void)
        rows(out, out_len) != 2)
         failed = 1;
     fymd_free(out);
+
+    memset(&chrome_cfg, 0, sizeof(chrome_cfg));
+    chrome_cfg.width = 12;
+    chrome = fymd_renderer_create(&chrome_cfg);
+    out = NULL;
+    out_len = 0;
+    if(chrome == NULL ||
+       fymd_render_with_margins(chrome, "alpha beta gamma", 16, margin, NULL,
+                                &out, &out_len) != 0 ||
+       memcmp(out, "@@alpha", 7) != 0 ||
+       strstr(out, "\n--beta") == NULL)
+        failed = 1;
+    fymd_free(out);
+    fymd_renderer_destroy(chrome);
 
     if(fymd_render_push(r, "a\n", 2, &upd) != 0 ||
        fymd_renderer_set_line_limit(r, NULL) == 0)
