@@ -16,6 +16,8 @@ styles:
   kg-header-light:  "\e[1;48;2;226;224;213m"
   kg-row-dark:      "\e[48;2;31;31;40m"
   kg-row-light:     "\e[48;2;241;239;230m"
+  kg-card-dark:     "\e[48;2;42;42;55m"
+  kg-card-light:    "\e[48;2;226;224;213m"
   bg-off:           "\e[49m"
 
 elements:
@@ -30,6 +32,7 @@ elements:
   table_row_even:   { on: kg-row-dark, off: bg-off, light: { on: kg-row-light, off: bg-off } }
   list_marker:      { on: kg-heading-dark, off: default-fg, light: { on: kg-heading-light, off: default-fg } }
   task_done:        { on: kg-green-dark, off: default-fg, light: { on: kg-green-light, off: default-fg } }
+  reverse:          { on: kg-card-dark, off: reset, light: { on: kg-card-light, off: reset } }
 
 code:
   theme: kanagawa

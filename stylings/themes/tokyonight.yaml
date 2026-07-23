@@ -16,6 +16,8 @@ styles:
   tn-header-light:  "\e[1;48;2;207;214;245m"
   tn-row-dark:      "\e[48;2;26;27;38m"
   tn-row-light:     "\e[48;2;232;235;249m"
+  tn-card-dark:     "\e[48;2;41;46;66m"
+  tn-card-light:    "\e[48;2;207;214;245m"
   bg-off:           "\e[49m"
 
 elements:
@@ -30,6 +32,7 @@ elements:
   table_row_even:   { on: tn-row-dark, off: bg-off, light: { on: tn-row-light, off: bg-off } }
   list_marker:      { on: tn-heading-dark, off: default-fg, light: { on: tn-heading-light, off: default-fg } }
   task_done:        { on: tn-green-dark, off: default-fg, light: { on: tn-green-light, off: default-fg } }
+  reverse:          { on: tn-card-dark, off: reset, light: { on: tn-card-light, off: reset } }
 
 code:
   theme: tokyonight

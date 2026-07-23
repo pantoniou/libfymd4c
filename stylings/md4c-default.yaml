@@ -33,6 +33,7 @@ styles:
   heading:        "\e[1;35m"   # bold magenta
   link:           "\e[4;34m"   # underline blue
   link-url:       "\e[2;34m"   # dim blue
+  card:           "\e[7m"
 
 # Elements: each picks an "on"/"off" style by name. "light:" overrides on/off on
 # a light background.
@@ -56,6 +57,7 @@ elements:
   table_row_even:   { on: "",     off: "" }
   list_marker:   { on: dim,       off: dim-off }
   task_done:     { on: green,     off: default-fg, light: { on: black,  off: default-fg } }
+  reverse:       { on: card,      off: reset }
 
 # Glyphs.
 glyphs:

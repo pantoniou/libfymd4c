@@ -16,6 +16,8 @@ styles:
   cp-header-light:  "\e[1;48;2;220;224;232m"
   cp-row-dark:      "\e[48;2;30;30;46m"
   cp-row-light:     "\e[48;2;239;241;245m"
+  cp-card-dark:     "\e[48;2;49;50;68m"
+  cp-card-light:    "\e[48;2;220;224;232m"
   bg-off:           "\e[49m"
 
 elements:
@@ -30,6 +32,7 @@ elements:
   table_row_even:   { on: cp-row-dark, off: bg-off, light: { on: cp-row-light, off: bg-off } }
   list_marker:      { on: cp-heading-dark, off: default-fg, light: { on: cp-heading-light, off: default-fg } }
   task_done:        { on: cp-green-dark, off: default-fg, light: { on: cp-green-light, off: default-fg } }
+  reverse:          { on: cp-card-dark, off: reset, light: { on: cp-card-light, off: reset } }
 
 code:
   theme: catppuccin

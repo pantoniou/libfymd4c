@@ -12,6 +12,8 @@ styles:
   sz-header-light:  "\e[1;48;2;238;232;213m"
   sz-row-dark:      "\e[48;2;0;48;59m"
   sz-row-light:     "\e[48;2;250;244;224m"
+  sz-card-dark:     "\e[48;2;7;54;66m"
+  sz-card-light:    "\e[48;2;238;232;213m"
   bg-off:           "\e[49m"
 
 elements:
@@ -26,6 +28,7 @@ elements:
   table_row_even:   { on: sz-row-dark, off: bg-off, light: { on: sz-row-light, off: bg-off } }
   list_marker:      { on: sz-cyan, off: default-fg }
   task_done:        { on: sz-green, off: default-fg }
+  reverse:          { on: sz-card-dark, off: reset, light: { on: sz-card-light, off: reset } }
 
 code:
   theme: solarized

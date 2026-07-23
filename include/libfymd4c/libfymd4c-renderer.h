@@ -95,6 +95,15 @@ enum fymd_table_border {
     FYMD_TB_NONE        /* force borderless (no separators/vertical glyphs) */
 };
 
+/* Resolved style pairs applications may reuse for surrounding UI chrome. */
+enum fymd_style_element {
+    FYMD_STYLE_HEADING = 0,
+    FYMD_STYLE_STRONG,
+    FYMD_STYLE_BLOCKQUOTE,
+    FYMD_STYLE_RULE,
+    FYMD_STYLE_REVERSE
+};
+
 /* Layout width sentinels (match the columns argument otherwise). */
 #define FYMD_WIDTH_AUTO (-1) /* detect from $COLUMNS / terminal, else 80 */
 #define FYMD_WIDTH_INF  0    /* unlimited: size tables to content, no wrap */
@@ -199,6 +208,9 @@ int fymd_renderer_set_theme(struct fymd_renderer *r, const char *name) FYMD_EXPO
  * Returns 0 on success, -1 if r or its *style is NULL */
 int fymd_renderer_get_reverse_pair(struct fymd_renderer *r,
                                    const char **on, const char **off) FYMD_EXPORT;
+int fymd_renderer_get_style_pair(struct fymd_renderer *r,
+        enum fymd_style_element element,
+        const char **on, const char **off) FYMD_EXPORT;
 
 /* Configure a rendered-row viewport. The options and format string are copied.
  * Pass NULL, FYMD_LLM_NONE, or max_lines == 0 to disable it. This cannot be

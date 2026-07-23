@@ -453,16 +453,34 @@ fymd_renderer_get_cfg(struct fymd_renderer *r)
 }
 
 int
+fymd_renderer_get_style_pair(struct fymd_renderer *r,
+                             enum fymd_style_element element,
+                             const char **on, const char **off)
+{
+    const MD_STYLE_PAIR *pair;
+
+    if(r == NULL || r->style == NULL)
+        return -1;
+    switch(element) {
+    case FYMD_STYLE_HEADING:    pair = &r->style->heading; break;
+    case FYMD_STYLE_STRONG:     pair = &r->style->strong; break;
+    case FYMD_STYLE_BLOCKQUOTE: pair = &r->style->blockquote; break;
+    case FYMD_STYLE_RULE:       pair = &r->style->rule; break;
+    case FYMD_STYLE_REVERSE:    pair = &r->style->reverse; break;
+    default: return -1;
+    }
+    if(on != NULL)
+        *on = pair->on;
+    if(off != NULL)
+        *off = pair->off;
+    return 0;
+}
+
+int
 fymd_renderer_get_reverse_pair(struct fymd_renderer *r,
                                const char **on, const char **off)
 {
-    if(r == NULL || r->style == NULL)
-        return -1;
-    if(on != NULL)
-        *on = r->style->reverse.on;
-    if(off != NULL)
-        *off = r->style->reverse.off;
-    return 0;
+    return fymd_renderer_get_style_pair(r, FYMD_STYLE_REVERSE, on, off);
 }
 
 size_t

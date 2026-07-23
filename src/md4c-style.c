@@ -166,7 +166,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     LP("list_marker",   "\033[2m",    "\033[22m", list_marker);
     LP("task_done",     "\033[32m",   "\033[39m", task_done);
     /* Whole-document card background (mirrors libfyts' frame background). */
-    LP("reverse",       light ? "\033[47m" : "\033[40m", "\033[0m", reverse);
+    LP("reverse",       "\033[7m",         "\033[0m", reverse);
 #undef LP
 
     s->blockquote_bar   = load_str(reg, glyphs, "blockquote_bar",   "\xe2\x94\x82");

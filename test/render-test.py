@@ -91,7 +91,7 @@ def check_reverse(program):
     if out.returncode != 0:
         raise RuntimeError("fymd4c --reverse failed")
     lines = out.stdout.decode("utf-8").split("\n")[:-1]  # drop trailing ""
-    BG = "\x1b[40m"          # dark card background (from the style)
+    BG = "\x1b[7m"           # contrasting card style (from the theme)
     FILL = "\x1b[K\x1b[0m"   # erase-to-EOL + reset
     ok = bool(lines) and all(l.startswith(BG) and l.endswith(FILL) for l in lines)
     if not ok:
