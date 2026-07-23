@@ -83,21 +83,30 @@ def check_reverse(program):
     """Whole-document card (--reverse): every emitted line must be wrapped in
     the theme background and padded to the edge with erase-to-end-of-line."""
     text = "# Title\n\nSome text.\n\n- a\n- b\n"
-    out = subprocess.run(
-        [program, "-t", "ansi", "--color=on", "--reverse",
-         "--background=dark", "--width=30"],
-        input=text.encode("utf-8"),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if out.returncode != 0:
-        raise RuntimeError("fymd4c --reverse failed")
-    lines = out.stdout.decode("utf-8").split("\n")[:-1]  # drop trailing ""
-    BG = "\x1b[7m"           # contrasting card style (from the theme)
-    FILL = "\x1b[K\x1b[0m"   # erase-to-EOL + reset
-    ok = bool(lines) and all(l.startswith(BG) and l.endswith(FILL) for l in lines)
-    if not ok:
-        print("FAIL reverse_card")
-        for l in lines:
-            print("  %r" % l)
+    cards = {
+        "dark": "\x1b[48;2;40;42;46m",
+        "light": "\x1b[48;2;232;232;232m",
+    }
+    fill = "\x1b[K\x1b[0m"
+    ok = True
+    for background, card in cards.items():
+        out = subprocess.run(
+            [program, "-t", "ansi", "--color=on", "--reverse",
+             "--background=" + background, "--width=30"],
+            input=text.encode("utf-8"),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if out.returncode != 0:
+            raise RuntimeError("fymd4c --reverse failed")
+        lines = out.stdout.decode("utf-8").split("\n")[:-1]
+        empty = card + card + fill
+        valid = (bool(lines) and empty in lines and
+                 all(line.startswith(card) and line.endswith(fill)
+                     for line in lines))
+        if not valid:
+            ok = False
+            print("FAIL reverse_card/%s" % background)
+            for line in lines:
+                print("  %r" % line)
     return ok
 
 
