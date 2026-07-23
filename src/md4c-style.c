@@ -98,6 +98,36 @@ load_str(STRREG* reg, fy_generic map, const char* key, const char* dflt)
     return reg_dup(reg, fy_get(map, key, dflt));
 }
 
+static void
+load_indicators(MD_ANSI_STYLE* s, STRREG* reg, fy_generic indicators)
+{
+    fy_generic frames;
+    fy_generic frame;
+    size_t i, count;
+
+    frames = fy_get(indicators, "pending", fy_invalid);
+    count = fy_generic_is_sequence(frames) ? fy_len(frames) : 0;
+    if(count > 8)
+        count = 8;
+    for(i = 0; i < count; i++) {
+        frame = fy_get_at(frames, i);
+        s->indicator_pending_frames[i] =
+            reg_dup(reg, fy_castp(&frame, ""));
+    }
+    if(!count) {
+        s->indicator_pending_frames[0] = reg_dup(reg, "●");
+        s->indicator_pending_frames[1] = reg_dup(reg, " ");
+        count = 2;
+    }
+    s->indicator_pending_frame_count = count;
+    s->indicator_success_glyph =
+        load_str(reg, indicators, "success", "●");
+    s->indicator_failure_glyph =
+        load_str(reg, indicators, "failure", "●");
+    s->indicator_interval_ms =
+        (unsigned int) fy_get(indicators, "interval_ms", (long) 500);
+}
+
 /* dark | light | auto -> concrete. auto consults $COLORFGBG (bg field >= 8 or
  * "default" -> light), else assumes dark. */
 static MD_STYLE_BG
@@ -128,6 +158,7 @@ static void
 build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_OPTS* opts)
 {
     fy_generic elements, glyphs, code, decoration, table, styles;
+    fy_generic indicators;
     const char* bg;
     int light;
 
@@ -137,6 +168,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     decoration = fy_get(code, "decoration", fy_invalid);
     table    = fy_get(root, "table",    fy_invalid);
     styles   = fy_get(root, "styles",   fy_invalid);
+    indicators = fy_get(root, "indicators", fy_invalid);
 
     if(opts != NULL && opts->background != MD_STYLE_BG_AUTO)
         s->background = opts->background;
@@ -167,7 +199,11 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     LP("task_done",     "\033[32m",   "\033[39m", task_done);
     /* Whole-document card background (mirrors libfyts' frame background). */
     LP("reverse",       "\033[7m",         "\033[0m", reverse);
+    LP("indicator_pending", "\033[33m", "\033[39m", indicator_pending);
+    LP("indicator_success", "\033[32m", "\033[39m", indicator_success);
+    LP("indicator_failure", "\033[31m", "\033[39m", indicator_failure);
 #undef LP
+    load_indicators(s, reg, indicators);
 
     s->blockquote_bar   = load_str(reg, glyphs, "blockquote_bar",   "\xe2\x94\x82");
     s->list_bullet      = load_str(reg, glyphs, "list_bullet",      "*");

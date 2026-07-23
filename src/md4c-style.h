@@ -51,6 +51,14 @@ typedef struct MD_ANSI_STYLE {
     MD_STYLE_PAIR list_marker;   /* list bullets / ordered numbers */
     MD_STYLE_PAIR task_done;     /* checked task-list marker */
     MD_STYLE_PAIR reverse;       /* whole-document card background (.on = bg set) */
+    MD_STYLE_PAIR indicator_pending;
+    MD_STYLE_PAIR indicator_success;
+    MD_STYLE_PAIR indicator_failure;
+    const char* indicator_pending_frames[8];
+    size_t indicator_pending_frame_count;
+    const char* indicator_success_glyph;
+    const char* indicator_failure_glyph;
+    unsigned int indicator_interval_ms;
 
     const char* blockquote_bar;
     const char* list_bullet;

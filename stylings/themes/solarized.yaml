@@ -6,6 +6,7 @@ styles:
   sz-cyan:          "\e[38;2;42;161;152m"
   sz-green:         "\e[38;2;133;153;0m"
   sz-yellow:        "\e[38;2;181;137;0m"
+  sz-red:           "\e[38;2;220;50;47m"
   sz-muted-dark:    "\e[38;2;88;110;117m"
   sz-muted-light:   "\e[38;2;147;161;161m"
   sz-header-dark:   "\e[1;48;2;7;54;66m"
@@ -29,6 +30,15 @@ elements:
   list_marker:      { on: sz-cyan, off: default-fg }
   task_done:        { on: sz-green, off: default-fg }
   reverse:          { on: sz-card-dark, off: reset, light: { on: sz-card-light, off: reset } }
+  indicator_pending: { on: sz-yellow, off: default-fg }
+  indicator_success: { on: sz-green, off: default-fg }
+  indicator_failure: { on: sz-red, off: default-fg }
+
+indicators:
+  interval_ms: 500
+  pending: ["●", " "]
+  success: "●"
+  failure: "●"
 
 code:
   theme: solarized

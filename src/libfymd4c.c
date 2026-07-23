@@ -467,12 +467,58 @@ fymd_renderer_get_style_pair(struct fymd_renderer *r,
     case FYMD_STYLE_BLOCKQUOTE: pair = &r->style->blockquote; break;
     case FYMD_STYLE_RULE:       pair = &r->style->rule; break;
     case FYMD_STYLE_REVERSE:    pair = &r->style->reverse; break;
+    case FYMD_STYLE_INDICATOR_PENDING:
+        pair = &r->style->indicator_pending; break;
+    case FYMD_STYLE_INDICATOR_SUCCESS:
+        pair = &r->style->indicator_success; break;
+    case FYMD_STYLE_INDICATOR_FAILURE:
+        pair = &r->style->indicator_failure; break;
     default: return -1;
     }
     if(on != NULL)
         *on = pair->on;
     if(off != NULL)
         *off = pair->off;
+    return 0;
+}
+
+int
+fymd_renderer_get_indicator(struct fymd_renderer *r,
+                            enum fymd_indicator_state state,
+                            size_t frame, const char **glyph,
+                            const char **on, const char **off,
+                            unsigned int *interval_ms)
+{
+    const MD_STYLE_PAIR* pair;
+    const char* marker;
+
+    if(r == NULL || r->style == NULL)
+        return -1;
+    switch(state) {
+    case FYMD_INDICATOR_PENDING:
+        pair = &r->style->indicator_pending;
+        marker = r->style->indicator_pending_frames[
+            frame % r->style->indicator_pending_frame_count];
+        break;
+    case FYMD_INDICATOR_SUCCESS:
+        pair = &r->style->indicator_success;
+        marker = r->style->indicator_success_glyph;
+        break;
+    case FYMD_INDICATOR_FAILURE:
+        pair = &r->style->indicator_failure;
+        marker = r->style->indicator_failure_glyph;
+        break;
+    default:
+        return -1;
+    }
+    if(glyph != NULL)
+        *glyph = marker;
+    if(on != NULL)
+        *on = pair->on;
+    if(off != NULL)
+        *off = pair->off;
+    if(interval_ms != NULL)
+        *interval_ms = r->style->indicator_interval_ms;
     return 0;
 }
 

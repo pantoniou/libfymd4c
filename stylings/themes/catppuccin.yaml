@@ -10,6 +10,8 @@ styles:
   cp-green-light:   "\e[38;2;64;160;43m"
   cp-yellow-dark:   "\e[38;2;249;226;175m"
   cp-yellow-light:  "\e[38;2;223;142;29m"
+  cp-red-dark:      "\e[38;2;243;139;168m"
+  cp-red-light:     "\e[38;2;210;15;57m"
   cp-muted-dark:    "\e[38;2;127;132;156m"
   cp-muted-light:   "\e[38;2;140;143;161m"
   cp-header-dark:   "\e[1;48;2;49;50;68m"
@@ -33,6 +35,18 @@ elements:
   list_marker:      { on: cp-heading-dark, off: default-fg, light: { on: cp-heading-light, off: default-fg } }
   task_done:        { on: cp-green-dark, off: default-fg, light: { on: cp-green-light, off: default-fg } }
   reverse:          { on: cp-card-dark, off: reset, light: { on: cp-card-light, off: reset } }
+  indicator_pending:
+    { on: cp-yellow-dark, light: { on: cp-yellow-light } }
+  indicator_success:
+    { on: cp-green-dark, light: { on: cp-green-light } }
+  indicator_failure:
+    { on: cp-red-dark, light: { on: cp-red-light } }
+
+indicators:
+  interval_ms: 500
+  pending: ["●", " "]
+  success: "●"
+  failure: "●"
 
 code:
   theme: catppuccin

@@ -30,6 +30,8 @@ main(void)
     struct fy_generic_builder *gb = NULL;
     fy_generic vars = fy_invalid;
     fy_generic_sized_string vars_yaml;
+    const char *glyph, *on, *off;
+    unsigned int interval_ms;
 
     memset(&cfg, 0, sizeof(cfg));
     cfg.flags = FYMD_RF_NO_COLOR;
@@ -44,6 +46,17 @@ main(void)
        fymd_renderer_set_theme(r, "catppuccin") != 0 ||
        strcmp(fymd_renderer_get_cfg(r)->theme, "catppuccin") != 0 ||
        fymd_renderer_set_theme(r, "not-a-theme") == 0)
+        failed = 1;
+    if(fymd_renderer_get_indicator(r, FYMD_INDICATOR_PENDING, 0,
+                                   &glyph, &on, &off, &interval_ms) != 0 ||
+       strcmp(glyph, "●") != 0 || on == NULL || off == NULL ||
+       interval_ms != 500 ||
+       fymd_renderer_get_indicator(r, FYMD_INDICATOR_PENDING, 1,
+                                   &glyph, NULL, NULL, NULL) != 0 ||
+       strcmp(glyph, " ") != 0 ||
+       fymd_renderer_get_indicator(r, FYMD_INDICATOR_SUCCESS, 0,
+                                   &glyph, NULL, NULL, NULL) != 0 ||
+       strcmp(glyph, "●") != 0)
         failed = 1;
 
     memset(&opts, 0, sizeof(opts));

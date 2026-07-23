@@ -59,6 +59,15 @@ elements:
   list_marker:   { on: dim,       off: dim-off }
   task_done:     { on: green,     off: default-fg, light: { on: black,  off: default-fg } }
   reverse:       { on: card-dark, off: reset, light: { on: card-light, off: reset } }
+  indicator_pending: { on: yellow, off: default-fg }
+  indicator_success: { on: green, off: default-fg }
+  indicator_failure: { on: red, off: default-fg }
+
+indicators:
+  interval_ms: 500
+  pending: ["●", " "]
+  success: "●"
+  failure: "●"
 
 # Glyphs.
 glyphs:

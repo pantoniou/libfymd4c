@@ -10,6 +10,8 @@ styles:
   tn-green-light:   "\e[38;2;72;119;50m"
   tn-yellow-dark:   "\e[38;2;224;175;104m"
   tn-yellow-light:  "\e[38;2;143;94;21m"
+  tn-red-dark:      "\e[38;2;247;118;142m"
+  tn-red-light:     "\e[38;2;140;67;81m"
   tn-muted-dark:    "\e[38;2;86;95;137m"
   tn-muted-light:   "\e[38;2;99;109;166m"
   tn-header-dark:   "\e[1;48;2;41;46;66m"
@@ -33,6 +35,18 @@ elements:
   list_marker:      { on: tn-heading-dark, off: default-fg, light: { on: tn-heading-light, off: default-fg } }
   task_done:        { on: tn-green-dark, off: default-fg, light: { on: tn-green-light, off: default-fg } }
   reverse:          { on: tn-card-dark, off: reset, light: { on: tn-card-light, off: reset } }
+  indicator_pending:
+    { on: tn-yellow-dark, light: { on: tn-yellow-light } }
+  indicator_success:
+    { on: tn-green-dark, light: { on: tn-green-light } }
+  indicator_failure:
+    { on: tn-red-dark, light: { on: tn-red-light } }
+
+indicators:
+  interval_ms: 500
+  pending: ["●", " "]
+  success: "●"
+  failure: "●"
 
 code:
   theme: tokyonight

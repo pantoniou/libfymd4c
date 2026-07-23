@@ -101,7 +101,16 @@ enum fymd_style_element {
     FYMD_STYLE_STRONG,
     FYMD_STYLE_BLOCKQUOTE,
     FYMD_STYLE_RULE,
-    FYMD_STYLE_REVERSE
+    FYMD_STYLE_REVERSE,
+    FYMD_STYLE_INDICATOR_PENDING,
+    FYMD_STYLE_INDICATOR_SUCCESS,
+    FYMD_STYLE_INDICATOR_FAILURE
+};
+
+enum fymd_indicator_state {
+    FYMD_INDICATOR_PENDING = 0,
+    FYMD_INDICATOR_SUCCESS,
+    FYMD_INDICATOR_FAILURE
 };
 
 /* Layout width sentinels (match the columns argument otherwise). */
@@ -211,6 +220,10 @@ int fymd_renderer_get_reverse_pair(struct fymd_renderer *r,
 int fymd_renderer_get_style_pair(struct fymd_renderer *r,
         enum fymd_style_element element,
         const char **on, const char **off) FYMD_EXPORT;
+int fymd_renderer_get_indicator(struct fymd_renderer *r,
+        enum fymd_indicator_state state, size_t frame,
+        const char **glyph, const char **on, const char **off,
+        unsigned int *interval_ms) FYMD_EXPORT;
 
 /* Configure a rendered-row viewport. The options and format string are copied.
  * Pass NULL, FYMD_LLM_NONE, or max_lines == 0 to disable it. This cannot be

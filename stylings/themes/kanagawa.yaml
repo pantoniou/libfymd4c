@@ -10,6 +10,8 @@ styles:
   kg-green-light:   "\e[38;2;111;137;78m"
   kg-yellow-dark:   "\e[38;2;230;195;132m"
   kg-yellow-light:  "\e[38;2;180;116;0m"
+  kg-red-dark:      "\e[38;2;195;64;67m"
+  kg-red-light:     "\e[38;2;196;78;82m"
   kg-muted-dark:    "\e[38;2;114;113;105m"
   kg-muted-light:   "\e[38;2;113;110;97m"
   kg-header-dark:   "\e[1;48;2;42;42;55m"
@@ -33,6 +35,18 @@ elements:
   list_marker:      { on: kg-heading-dark, off: default-fg, light: { on: kg-heading-light, off: default-fg } }
   task_done:        { on: kg-green-dark, off: default-fg, light: { on: kg-green-light, off: default-fg } }
   reverse:          { on: kg-card-dark, off: reset, light: { on: kg-card-light, off: reset } }
+  indicator_pending:
+    { on: kg-yellow-dark, light: { on: kg-yellow-light } }
+  indicator_success:
+    { on: kg-green-dark, light: { on: kg-green-light } }
+  indicator_failure:
+    { on: kg-red-dark, light: { on: kg-red-light } }
+
+indicators:
+  interval_ms: 500
+  pending: ["●", " "]
+  success: "●"
+  failure: "●"
 
 code:
   theme: kanagawa
