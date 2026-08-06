@@ -172,11 +172,25 @@ delim_run(const char* text, unsigned size, unsigned pos, char marker,
     *end = e;
 }
 
-/* Can the delimiter run [start,end) open emphasis? CommonMark needs it to be
- * left-flanking: no whitespace (or text edge) directly after it, and for '_'
- * no word character directly before it (there is no intraword '_' emphasis).
- * A run that can neither open nor close is literal text -- appending a closer
- * for it only adds a second literal marker. */
+/* Punctuation an emphasis run may open directly after. Anything else before
+ * the run means the text is not starting emphasis there: a shell glob such as
+ * "src/" plus a star, or "a*b", is not emphasis. CommonMark calls such runs
+ * left-flanking, and the
+ * parser does keep them as candidate openers, but healing one appends a
+ * closer for emphasis the author never started. */
+static inline int
+is_open_punct(char c)
+{
+    return c == '(' || c == '[' || c == '{' || c == '<' ||
+           c == '"' || c == '\'';
+}
+
+/* Can the delimiter run [start,end) open emphasis? It must be left-flanking:
+ * no whitespace (or text edge) directly after it, and for '_' no word
+ * character directly before it (there is no intraword '_' emphasis). It must
+ * also start a span: whitespace, the text edge, or an opening punctuation
+ * before it. A run that can neither open nor close is literal text --
+ * appending a closer for it only adds a second literal marker. */
 static int
 run_can_open(const char* text, unsigned size, unsigned start, unsigned end,
              char marker)
@@ -185,6 +199,8 @@ run_can_open(const char* text, unsigned size, unsigned start, unsigned end,
     char next = (end < size) ? text[end] : 0;
 
     if(is_ws_or_edge(next))
+        return 0;
+    if(!is_ws_or_edge(prev) && !is_open_punct(prev))
         return 0;
     if(marker == '_' && is_word_char(prev))
         return 0;
@@ -225,6 +241,36 @@ last_run_can_open(const char* text, unsigned size, char marker)
         return run_can_open(text, size, start, end, marker);
     }
     return 0;
+}
+
+/* Insert a closing marker where it can actually close: directly after the
+ * last non-whitespace byte, never after the trailing newlines. A closer must
+ * be right-flanking, so one parked past the end of the line closes nothing
+ * and renders as a literal marker on a line of its own. Text that is all
+ * whitespace has nothing to close and is left alone. */
+static void
+buf_close_marker(HEAL_BUF* buf, const char* marker, unsigned len)
+{
+    unsigned end = buf->size;
+    char* tail;
+    unsigned tail_len;
+
+    while(end > 0 && is_ws_or_edge(buf->data[end - 1]))
+        end--;
+    if(end == 0)
+        return;
+    tail_len = buf->size - end;
+    if(tail_len == 0) {
+        buf_append(buf, marker, len);
+        return;
+    }
+    tail = (char*) malloc(tail_len);
+    if(!tail) { buf->error = 1; return; }
+    memcpy(tail, buf->data + end, tail_len);
+    buf->size = end;
+    buf_append(buf, marker, len);
+    buf_append(buf, tail, tail_len);
+    free(tail);
 }
 
 /* true if it's ESC followed by bracket */
@@ -812,9 +858,9 @@ heal_bold(HEAL_BUF* buf)
     if(pairs % 2 != 0) {
         /* Half-complete: **content* → **content** */
         if(text[size - 1] == '*' && size > marker_pos + 3) {
-            buf_append_ch(buf, '*');
+            buf_close_marker(buf, "*", 1);
         } else {
-            buf_append(buf, "**", 2);
+            buf_close_marker(buf, "**", 2);
         }
     }
 }
@@ -832,7 +878,7 @@ heal_italic_asterisk(HEAL_BUF* buf)
 
     singles = count_single_asterisks(text, size);
     if(singles % 2 != 0) {
-        buf_append_ch(buf, '*');
+        buf_close_marker(buf, "*", 1);
     }
 }
 
@@ -852,14 +898,14 @@ heal_italic_double_underscore(HEAL_BUF* buf)
        text[size - 2] != '_' && text[size - 2] != '\\') {
         pairs = count_double_underscores(text, size);
         if(pairs % 2 != 0) {
-            buf_append_ch(buf, '_');
+            buf_close_marker(buf, "_", 1);
             return;
         }
     }
 
     pairs = count_double_underscores(text, size);
     if(pairs % 2 != 0) {
-        buf_append(buf, "__", 2);
+        buf_close_marker(buf, "__", 2);
     }
 }
 
@@ -875,24 +921,8 @@ heal_italic_underscore(HEAL_BUF* buf)
     if(!last_run_can_open(text, size, '_')) return;
 
     singles = count_single_underscores(text, size);
-    if(singles % 2 != 0) {
-        /* Append before trailing newlines */
-        unsigned end = size;
-        while(end > 0 && buf->data[end - 1] == '\n') end--;
-
-        if(end < size) {
-            /* Insert _ before trailing newlines */
-            char* tail = (char*) malloc(size - end);
-            if(!tail) { buf->error = 1; return; }
-            memcpy(tail, buf->data + end, size - end);
-            buf->size = end;
-            buf_append_ch(buf, '_');
-            buf_append(buf, tail, size - end);
-            free(tail);
-        } else {
-            buf_append_ch(buf, '_');
-        }
-    }
+    if(singles % 2 != 0)
+        buf_close_marker(buf, "_", 1);
 }
 
 /* Heal bold-italic (***) */
@@ -924,7 +954,7 @@ heal_bold_italic(HEAL_BUF* buf)
         unsigned doubles = count_double_asterisks(text, size);
         unsigned singles = count_single_asterisks(text, size);
         if(doubles % 2 == 0 && singles % 2 == 0) return;
-        buf_append(buf, "***", 3);
+        buf_close_marker(buf, "***", 3);
     }
 }
 
@@ -949,7 +979,7 @@ heal_strikethrough(HEAL_BUF* buf)
         while(i > 0) {
             if(text[i] == '~' && i > 0 && text[i-1] == '~') {
                 if(has_meaningful_content(text, i + 1, size - 1)) {
-                    buf_append_ch(buf, '~');
+                    buf_close_marker(buf, "~", 1);
                     return;
                 }
             }
@@ -964,7 +994,7 @@ heal_strikethrough(HEAL_BUF* buf)
         for(i = size; i >= 2; i--) {
             if(text[i-2] == '~' && text[i-1] == '~') {
                 if(i < size && has_meaningful_content(text, i, size)) {
-                    buf_append(buf, "~~", 2);
+                    buf_close_marker(buf, "~~", 2);
                     return;
                 }
             }
