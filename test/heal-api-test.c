@@ -21,6 +21,8 @@ static const struct heal_case cases[] = {
     { "plain _ital",         "plain _ital_"      },
     { "x __strong",          "x __strong__"      },
     { "**bold** and *it",    "**bold** and *it*" },
+    { "see (*note",          "see (*note*"       },
+    { "strike ~~out",        "strike ~~out~~"    },
     /* not openers: left alone */
     { "checking a ** b now", "checking a ** b now" },
     { "use more_ later",     "use more_ later"     },
@@ -28,6 +30,15 @@ static const struct heal_case cases[] = {
     { "a * b",               "a * b"               },
     /* already balanced: left alone */
     { "all *done* here",     "all *done* here"     },
+    /* globs and products are not dangling emphasis openers */
+    { "pmccabe -v src/*.c",  "pmccabe -v src/*.c"  },
+    { "a*b times",           "a*b times"           },
+    /* already balanced: left alone */
+    { "all *done* here",     "all *done* here"     },
+    /* the closer goes where it can close: past the last newline it would
+     * render as a literal marker on a line of its own */
+    { "use *emph\n",         "use *emph*\n"        },
+    { "use **strong\n\n",     "use **strong**\n\n"  },
 };
 
 int
