@@ -196,6 +196,10 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(line-limit-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME line-limit-api COMMAND line-limit-api-test)
 
+        add_executable(heal-api-test test/heal-api-test.c)
+        target_link_libraries(heal-api-test PRIVATE libfymd4c::libfymd4c)
+        add_test(NAME heal-api COMMAND heal-api-test)
+
         add_executable(fenced-api-test test/fenced-api-test.c)
         target_link_libraries(fenced-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME fenced-api COMMAND fenced-api-test)
