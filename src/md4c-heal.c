@@ -153,6 +153,80 @@ is_escaped(const char* text, unsigned pos)
     return (n % 2) != 0;
 }
 
+/* Whitespace, or the edge of the text (reported as a NUL neighbour). */
+static inline int
+is_ws_or_edge(char c)
+{
+    return c == 0 || c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+/* Extent of the run of @marker characters that contains @pos. */
+static void
+delim_run(const char* text, unsigned size, unsigned pos, char marker,
+          unsigned* start, unsigned* end)
+{
+    unsigned s = pos, e = pos;
+    while(s > 0 && text[s - 1] == marker) s--;
+    while(e < size && text[e] == marker) e++;
+    *start = s;
+    *end = e;
+}
+
+/* Can the delimiter run [start,end) open emphasis? CommonMark needs it to be
+ * left-flanking: no whitespace (or text edge) directly after it, and for '_'
+ * no word character directly before it (there is no intraword '_' emphasis).
+ * A run that can neither open nor close is literal text -- appending a closer
+ * for it only adds a second literal marker. */
+static int
+run_can_open(const char* text, unsigned size, unsigned start, unsigned end,
+             char marker)
+{
+    char prev = (start > 0) ? text[start - 1] : 0;
+    char next = (end < size) ? text[end] : 0;
+
+    if(is_ws_or_edge(next))
+        return 0;
+    if(marker == '_' && is_word_char(prev))
+        return 0;
+    return 1;
+}
+
+/* Can the delimiter run [start,end) close emphasis? The mirror of the above:
+ * right-flanking, so no whitespace directly before it. */
+static int
+run_can_close(const char* text, unsigned size, unsigned start, unsigned end,
+              char marker)
+{
+    char prev = (start > 0) ? text[start - 1] : 0;
+    char next = (end < size) ? text[end] : 0;
+
+    if(is_ws_or_edge(prev))
+        return 0;
+    if(marker == '_' && is_word_char(next))
+        return 0;
+    return 1;
+}
+
+/* Does the LAST run of @marker in the text open something that is still open?
+ * Heal appends a closer, which is only meaningful when the dangling run is a
+ * valid opener. A trailing run that can only close (e.g. the '_' of "more_")
+ * has nothing to close, and healing it renders both markers literally. */
+static int
+last_run_can_open(const char* text, unsigned size, char marker)
+{
+    unsigned i, start, end;
+
+    for(i = size; i > 0; i--) {
+        if(text[i - 1] != marker)
+            continue;
+        if(is_escaped(text, i - 1))
+            continue;
+        delim_run(text, size, i - 1, marker, &start, &end);
+        return run_can_open(text, size, start, end, marker);
+    }
+    return 0;
+}
+
 /* true if it's ESC followed by bracket */
 static inline int
 is_ansi_bracket(const char* text, unsigned pos)
@@ -461,7 +535,13 @@ count_double_asterisks(const char* text, unsigned size)
         }
         if(in_code) continue;
         if(text[i] == '*' && i + 1 < size && text[i+1] == '*') {
-            count++;
+            unsigned start, end;
+            delim_run(text, size, i, '*', &start, &end);
+            /* A run that can neither open nor close (e.g. the "**" of
+             * "a ** b") is literal text the parser never consumes. */
+            if(run_can_open(text, size, start, end, '*') ||
+               run_can_close(text, size, start, end, '*'))
+                count++;
             i++; /* skip second * */
         }
     }
@@ -483,7 +563,11 @@ count_double_underscores(const char* text, unsigned size)
         }
         if(in_code) continue;
         if(text[i] == '_' && i + 1 < size && text[i+1] == '_') {
-            count++;
+            unsigned start, end;
+            delim_run(text, size, i, '_', &start, &end);
+            if(run_can_open(text, size, start, end, '_') ||
+               run_can_close(text, size, start, end, '_'))
+                count++;
             i++;
         }
     }
@@ -712,6 +796,9 @@ heal_bold(HEAL_BUF* buf)
     marker_pos = match_bold_at_end(text, size);
     if(marker_pos >= size) return;
 
+    /* Only a dangling OPENER wants a closer appended */
+    if(!last_run_can_open(text, size, '*')) return;
+
     /* Check not in code block or complete inline code */
     if(in_complete_inline_code(text, size, marker_pos)) return;
 
@@ -741,6 +828,7 @@ heal_italic_asterisk(HEAL_BUF* buf)
     unsigned singles;
 
     if(in_fenced_code_block(text, size, size)) return;
+    if(!last_run_can_open(text, size, '*')) return;
 
     singles = count_single_asterisks(text, size);
     if(singles % 2 != 0) {
@@ -757,6 +845,7 @@ heal_italic_double_underscore(HEAL_BUF* buf)
     unsigned pairs;
 
     if(in_fenced_code_block(text, size, size)) return;
+    if(!last_run_can_open(text, size, '_')) return;
 
     /* Half-complete: __text_ at end -> __text__ */
     if(size >= 4 && text[size - 1] == '_' &&
@@ -783,6 +872,7 @@ heal_italic_underscore(HEAL_BUF* buf)
     unsigned singles;
 
     if(in_fenced_code_block(text, size, size)) return;
+    if(!last_run_can_open(text, size, '_')) return;
 
     singles = count_single_underscores(text, size);
     if(singles % 2 != 0) {
@@ -824,6 +914,8 @@ heal_bold_italic(HEAL_BUF* buf)
         }
         if(all_stars) return;
     }
+
+    if(!last_run_can_open(text, size, '*')) return;
 
     triples = count_triple_asterisks(text, size);
     if(triples % 2 != 0) {
