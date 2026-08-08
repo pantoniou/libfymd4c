@@ -80,6 +80,7 @@ extern "C"
                                    unhealed truth) */
         const MD_ANSI_STYLE* style; /* styling context (borrowed; NULL => built-in default).
                                    Must outlive the stream. */
+        struct fyts_ctx** fyts_ctx; /* borrowed reusable highlighter slot */
         int max_active_lines;   /* 0 => unlimited (default). >0: cap the active region to
                                    this many input lines. When a single block never reaches a
                                    safe sync point, the oldest excess lines are force-committed

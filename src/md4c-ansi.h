@@ -116,11 +116,17 @@ extern "C"
      * render repeatedly (e.g. the streaming front-end) should build one
      * MD_ANSI_STYLE and pass it here to avoid re-parsing the config each time. */
     struct MD_ANSI_STYLE;
+    struct fyts_ctx;
     typedef const char *(*MD_ANSI_MARGIN_FN)(void *userdata, size_t row);
     int md_ansi_ex_styled(const MD_CHAR *input, MD_SIZE input_size,
                           void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
                           void *userdata, unsigned parser_flags, unsigned renderer_flags,
                           int width, const struct MD_ANSI_STYLE *style);
+    int md_ansi_ex_styled_ctx(const MD_CHAR *input, MD_SIZE input_size,
+                          void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
+                          void *userdata, unsigned parser_flags, unsigned renderer_flags,
+                          int width, const struct MD_ANSI_STYLE *style,
+                          struct fyts_ctx **fyts_ctx);
     int md_ansi_ex_styled_margins(const MD_CHAR *input, MD_SIZE input_size,
                           void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
                           void *userdata, unsigned parser_flags, unsigned renderer_flags,
@@ -137,7 +143,8 @@ extern "C"
                               unsigned fence_flags,
                               void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
                               void *userdata, unsigned renderer_flags, int width,
-                              const struct MD_ANSI_STYLE *style);
+                              const struct MD_ANSI_STYLE *style,
+                              struct fyts_ctx **fyts_ctx);
 
     /* Resolve the auto layout width: from $COLUMNS, then the terminal
      * (TIOCGWINSZ), else 80. This is what MD_ANSI_WIDTH_AUTO uses internally;

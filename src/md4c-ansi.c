@@ -200,6 +200,7 @@ struct MD_ANSI_tag {
     MD_SIZE code_lang_size;
     char* code_buf;         /* buffered raw code text */
     MD_SIZE code_size, code_cap;
+    struct fyts_ctx** fyts_ctx;
 
     char* sgr_buf;          /* scratch for filtering escapes out of input text */
     MD_SIZE sgr_cap;
@@ -1850,7 +1851,27 @@ emit_highlighted_code(MD_ANSI* r, int styled)
         cfg.epilog = footer;
     }
 
-    rc = fyts_highlight_source(&cfg, r->code_buf, r->code_size);
+    if(r->fyts_ctx != NULL) {
+        char* output = NULL;
+        size_t output_len = 0;
+        if(*r->fyts_ctx != NULL && fyts_ctx_configure(*r->fyts_ctx, &cfg) != 0) {
+            fyts_ctx_destroy(*r->fyts_ctx);
+            *r->fyts_ctx = NULL;
+        }
+        if(*r->fyts_ctx == NULL)
+            *r->fyts_ctx = fyts_ctx_create(&cfg);
+        if(*r->fyts_ctx == NULL ||
+           fyts_ctx_highlight_source(*r->fyts_ctx, r->code_buf, r->code_size,
+                                     &output, &output_len) != 0) {
+            free(output);
+            return 0;
+        }
+        render_verbatim(r, output, (MD_SIZE) output_len);
+        free(output);
+        rc = 0;
+    } else {
+        rc = fyts_highlight_source(&cfg, r->code_buf, r->code_size);
+    }
     if(rc < 0)
         return 0;            /* 0 => caller emits the plain fallback */
     return reverse ? 2 : 1;  /* reverse: header+code+footer all done by fyts */
@@ -2449,16 +2470,17 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
                   void* userdata, unsigned parser_flags, unsigned renderer_flags,
                   int width, const struct MD_ANSI_STYLE* style)
 {
-    return md_ansi_ex_styled_margins(input, input_size, process_output,
-            userdata, parser_flags, renderer_flags, width, style, NULL, NULL);
+    return md_ansi_ex_styled_ctx(input, input_size, process_output, userdata,
+                                 parser_flags, renderer_flags, width, style, NULL);
 }
 
-int
-md_ansi_ex_styled_margins(const MD_CHAR* input, MD_SIZE input_size,
+static int
+md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
                   void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
                   void* userdata, unsigned parser_flags, unsigned renderer_flags,
                   int width, const struct MD_ANSI_STYLE* style,
-                  MD_ANSI_MARGIN_FN margin_fn, void* margin_userdata)
+                  MD_ANSI_MARGIN_FN margin_fn, void* margin_userdata,
+                  struct fyts_ctx** fyts_ctx)
 {
     MD_ANSI render;
     MD_PARSER parser;
@@ -2472,10 +2494,10 @@ md_ansi_ex_styled_margins(const MD_CHAR* input, MD_SIZE input_size,
             free(hbuf.data);
             return -1;
         }
-        ret = md_ansi_ex_styled_margins(hbuf.data, hbuf.size,
+        ret = md_ansi_ex_styled_margins_ctx(hbuf.data, hbuf.size,
                                 process_output, userdata,
                                 parser_flags, renderer_flags & ~MD_ANSI_FLAG_HEAL,
-                                width, style, margin_fn, margin_userdata);
+                                width, style, margin_fn, margin_userdata, fyts_ctx);
         free(hbuf.data);
         return ret;
     }
@@ -2497,6 +2519,7 @@ md_ansi_ex_styled_margins(const MD_CHAR* input, MD_SIZE input_size,
     render.table_width = width;
     render.margin_fn = margin_fn;
     render.margin_userdata = margin_userdata;
+    render.fyts_ctx = fyts_ctx;
     if(style == NULL) {
         owned_style = md_ansi_style_create(NULL, 0, NULL);
         if(owned_style == NULL)
@@ -2556,6 +2579,30 @@ md_ansi_ex_styled_margins(const MD_CHAR* input, MD_SIZE input_size,
     }
 }
 
+int
+md_ansi_ex_styled_ctx(const MD_CHAR* input, MD_SIZE input_size,
+                  void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
+                  void* userdata, unsigned parser_flags, unsigned renderer_flags,
+                  int width, const struct MD_ANSI_STYLE* style,
+                  struct fyts_ctx** fyts_ctx)
+{
+    return md_ansi_ex_styled_margins_ctx(input, input_size, process_output,
+            userdata, parser_flags, renderer_flags, width, style, NULL, NULL,
+            fyts_ctx);
+}
+
+int
+md_ansi_ex_styled_margins(const MD_CHAR* input, MD_SIZE input_size,
+                  void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
+                  void* userdata, unsigned parser_flags, unsigned renderer_flags,
+                  int width, const struct MD_ANSI_STYLE* style,
+                  MD_ANSI_MARGIN_FN margin_fn, void* margin_userdata)
+{
+    return md_ansi_ex_styled_margins_ctx(input, input_size, process_output,
+            userdata, parser_flags, renderer_flags, width, style, margin_fn,
+            margin_userdata, NULL);
+}
+
 /* Emit raw code one physical line at a time. Styled blocks use the same
  * two-column inset, clipping and code_block style as Markdown fences. */
 static void
@@ -2607,7 +2654,8 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
                        unsigned fence_flags,
                        void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
                        void* userdata, unsigned renderer_flags, int width,
-                       const struct MD_ANSI_STYLE* style)
+                       const struct MD_ANSI_STYLE* style,
+                       struct fyts_ctx** fyts_ctx)
 {
     MD_ANSI render;
     MD_ANSI_STYLE* owned_style = NULL;
@@ -2643,6 +2691,7 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
     render.template_lines = lines;
     render.template_plain_lines = plain_lines;
     render.template_hidden_lines = hidden_lines;
+    render.fyts_ctx = fyts_ctx;
     if((renderer_flags & MD_ANSI_FLAG_REVERSE) &&
        !(renderer_flags & MD_ANSI_FLAG_NO_COLOR) &&
        style->reverse.on != NULL && style->reverse.on[0] != '\0')

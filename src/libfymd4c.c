@@ -43,6 +43,9 @@ struct fymd_renderer {
     unsigned renderer_flags;        /* resolved MD_ANSI_FLAG_* for md_ansi */
     int width;                      /* MD_ANSI_WIDTH_* / columns */
     MD4C_STREAM *stream;            /* lazily created live stream, or NULL */
+#ifdef MD4C_WITH_FYTS
+    struct fyts_ctx *fyts_ctx;
+#endif
 
     struct fymd_line_limit_opts limit;
     char *limit_separator;
@@ -433,6 +436,9 @@ fymd_renderer_destroy(struct fymd_renderer *r)
         return;
     if(r->stream != NULL)
         md4c_stream_destroy(r->stream);
+#ifdef MD4C_WITH_FYTS
+    fyts_ctx_destroy(r->fyts_ctx);
+#endif
     if(r->style != NULL)
         md_ansi_style_destroy(r->style);
     free((void *) r->cfg.style);
@@ -579,6 +585,10 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
     else if(r->cfg.table_border == FYMD_TB_NONE)
         style->table_border_none = 1;
     md_ansi_style_destroy(r->style);
+#ifdef MD4C_WITH_FYTS
+    fyts_ctx_destroy(r->fyts_ctx);
+    r->fyts_ctx = NULL;
+#endif
     r->style = style;
     free((void *)r->cfg.style);
     free((void *)r->cfg.style_path);
@@ -745,7 +755,13 @@ fymd_render_fenced_block(struct fymd_renderer *r,
                                 opts->template_vars, lines, plain_lines,
                                 hidden_lines, ff,
                                 fymd_buf_append, &b, r->renderer_flags,
-                                r->width, r->style);
+                                r->width, r->style,
+#ifdef MD4C_WITH_FYTS
+                                &r->fyts_ctx
+#else
+                                NULL
+#endif
+                                );
     if(rc != 0 || b.oom) {
         free(b.data);
         return -1;
@@ -776,6 +792,9 @@ fymd_fill_stream_opts(struct fymd_renderer *r, MD4C_STREAM_OPTS *opts)
     opts->heal = (r->cfg.flags & FYMD_RF_HEAL) ? 1 : 0;
     opts->max_active_lines = r->cfg.max_active_lines;
     opts->style = r->style;
+#ifdef MD4C_WITH_FYTS
+    opts->fyts_ctx = &r->fyts_ctx;
+#endif
 }
 
 int

@@ -214,6 +214,44 @@ main(void)
         fymd_renderer_destroy(cr);
     }
 
+    /* A retained highlighter must stay byte-identical to the old path where a
+     * fresh renderer (and therefore a fresh fyts context) handles every prefix. */
+    {
+        static const char source[] = "int main(void) {\n  return 0;\n}\n";
+        static const size_t prefixes[] = { 17, 29, sizeof(source) - 1 };
+        struct fymd_renderer_cfg diff_cfg;
+        struct fymd_renderer *cached;
+        size_t i;
+
+        memset(&diff_cfg, 0, sizeof(diff_cfg));
+        diff_cfg.width = 80;
+        cached = fymd_renderer_create(&diff_cfg);
+        memset(&opts, 0, sizeof(opts));
+        opts.language = "c";
+        opts.flags = FYMD_FBF_HIGHLIGHT;
+        for(i = 0; cached != NULL && i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+            struct fymd_renderer *fresh;
+            char *cached_out = NULL, *fresh_out = NULL;
+            size_t cached_len = 0, fresh_len = 0;
+
+            fresh = fymd_renderer_create(&diff_cfg);
+            if(fresh == NULL ||
+               fymd_render_fenced_block(cached, source, prefixes[i], &opts,
+                                        &cached_out, &cached_len) != 0 ||
+               fymd_render_fenced_block(fresh, source, prefixes[i], &opts,
+                                        &fresh_out, &fresh_len) != 0 ||
+               cached_len != fresh_len ||
+               memcmp(cached_out, fresh_out, cached_len) != 0)
+                failed = 1;
+            fymd_free(cached_out);
+            fymd_free(fresh_out);
+            fymd_renderer_destroy(fresh);
+        }
+        if(cached == NULL)
+            failed = 1;
+        fymd_renderer_destroy(cached);
+    }
+
     fymd_free(bare);
     fymd_free(styled);
     fymd_free(highlighted);

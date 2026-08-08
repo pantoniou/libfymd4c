@@ -106,6 +106,7 @@ struct MD4C_STREAM {
     int heal;
     int max_active_lines; /* 0 => unlimited; else cap active region to this many input lines */
     const MD_ANSI_STYLE* style;  /* borrowed styling context (may be NULL) */
+    struct fyts_ctx** fyts_ctx;
 
     STREAM_BUF accum;     /* accumulated input */
     STREAM_BUF tail;      /* render of accum[anchor:] (active region) */
@@ -374,8 +375,9 @@ stream_render(MD4C_STREAM* s, STREAM_BUF* buf, const char* input,
         flags |= MD_ANSI_FLAG_STREAM_OPEN_CODE;
 
     sbuf_reset(buf);
-    ret = md_ansi_ex_styled(rin, (unsigned) rlen,
-                            sbuf_sink, buf, s->parser_flags, flags, s->width, s->style);
+    ret = md_ansi_ex_styled_ctx(rin, (unsigned) rlen, sbuf_sink, buf,
+                                s->parser_flags, flags, s->width, s->style,
+                                s->fyts_ctx);
     free(tmp);
     if(ret != 0 || buf->error)
         return -1;
@@ -647,6 +649,7 @@ md4c_stream_create(const MD4C_STREAM_OPTS* opts)
         s->heal = opts->heal;
         s->max_active_lines = opts->max_active_lines > 0 ? opts->max_active_lines : 0;
         s->style = opts->style;
+        s->fyts_ctx = opts->fyts_ctx;
     } else {
         s->parser_flags = MD4C_ANSI_PARSER_FLAGS;
         s->renderer_flags = 0;
