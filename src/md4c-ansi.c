@@ -367,7 +367,10 @@ out_direct(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
             e = ansi_esc_len(text + i, size - i);
             if(e > 0) {
                 out_sink(r, text + i, e);
-                if(e >= 3 && (unsigned char)text[i] == 0x1b && text[i + 1] == '[' &&
+                /* i + e <= size holds by construction; stated so the compiler
+                 * can see the accesses below are in bounds. */
+                if(e >= 3 && i + e <= size &&
+                   (unsigned char)text[i] == 0x1b && text[i + 1] == '[' &&
                    text[i + e - 1] == 'm' && sgr_is_reset(text + i + 2, e - 3))
                     out_sink(r, r->table_row_on,
                              (MD_SIZE)strlen(r->table_row_on));
