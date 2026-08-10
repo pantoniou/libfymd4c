@@ -157,7 +157,7 @@ if(MD4C_WITH_FYTS)
 
         FetchContent_Declare(libfyts
             GIT_REPOSITORY https://github.com/pantoniou/libfyts.git
-            GIT_TAG bc6a4042c52cd304dce265e5a775073acbc4f0b3
+            GIT_TAG bb55ef2c5049aed9817d89fb355dc30ac855bd36
         )
         # Grammars/tree-sitter must be PIC so the static fyts_static links cleanly
         # into our shared libfymd4c.
