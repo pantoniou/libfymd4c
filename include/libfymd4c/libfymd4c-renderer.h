@@ -72,7 +72,12 @@ enum fymd_cfg_flags {
     FYMD_RF_HEAL         = FYMD_BIT(3), /* close dangling markers in the active tail */
     FYMD_RF_REVERSE      = FYMD_BIT(4), /* render the whole document as a card
                                            (theme background filled to width) */
-    FYMD_RF_NO_CODE_HL   = FYMD_BIT(5)  /* disable fenced-code syntax highlighting */
+    FYMD_RF_NO_CODE_HL   = FYMD_BIT(5), /* disable fenced-code syntax highlighting */
+    FYMD_RF_NO_DIFF      = FYMD_BIT(6), /* render ```diff blocks as plain code
+                                           instead of a GitHub-like diff view */
+    FYMD_RF_NO_DIFF_LINES = FYMD_BIT(7),/* no line-number gutter in diff blocks */
+    FYMD_RF_NO_DIFF_HL   = FYMD_BIT(8)  /* do not highlight diff content as the
+                                           language of the patched file */
 };
 
 /* Sensible default flags: heal the in-progress tail. */

@@ -401,6 +401,9 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
         r->style->code_theme = r->cfg.code_theme; /* owned by cfg; freed there */
         r->style->code_enabled = (cfg->flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;
     }
+    if(cfg->flags & FYMD_RF_NO_DIFF)       r->style->diff_enabled = 0;
+    if(cfg->flags & FYMD_RF_NO_DIFF_LINES) r->style->diff_line_numbers = 0;
+    if(cfg->flags & FYMD_RF_NO_DIFF_HL)    r->style->diff_inner_highlight = 0;
     if(cfg->table_border == FYMD_TB_GRID)
         r->style->table_border_none = 0;
     else if(cfg->table_border == FYMD_TB_NONE)
@@ -580,6 +583,9 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
         style->code_theme = r->cfg.code_theme;
         style->code_enabled = (r->cfg.flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;
     }
+    if(r->cfg.flags & FYMD_RF_NO_DIFF)       style->diff_enabled = 0;
+    if(r->cfg.flags & FYMD_RF_NO_DIFF_LINES) style->diff_line_numbers = 0;
+    if(r->cfg.flags & FYMD_RF_NO_DIFF_HL)    style->diff_inner_highlight = 0;
     if(r->cfg.table_border == FYMD_TB_GRID)
         style->table_border_none = 0;
     else if(r->cfg.table_border == FYMD_TB_NONE)

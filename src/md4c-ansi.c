@@ -198,6 +198,8 @@ struct MD_ANSI_tag {
                                the closing fence) */
     char code_lang[64];     /* info string (language) of the current code block */
     MD_SIZE code_lang_size;
+    int code_diff;          /* current block is a diff/patch rendered GitHub-style */
+    char code_diff_lang[64];/* explicit inner language from the info string ("") */
     char* code_buf;         /* buffered raw code text */
     MD_SIZE code_size, code_cap;
     struct fyts_ctx** fyts_ctx;
@@ -1881,6 +1883,587 @@ emit_highlighted_code(MD_ANSI* r, int styled)
 }
 #endif /* MD4C_WITH_FYTS */
 
+/*********************************************
+ ***  Diff / patch blocks (GitHub-like)  ***
+ *********************************************/
+
+/* Row kinds of a unified diff. */
+#define DIFF_CTX   0    /* unchanged line inside a hunk (leading space) */
+#define DIFF_ADD   1    /* '+' line */
+#define DIFF_DEL   2    /* '-' line */
+#define DIFF_HUNK  3    /* "@@ -a,b +c,d @@" */
+#define DIFF_FILE  4    /* "diff --git", "index", "--- a/x", "+++ b/x", "\ No newline" */
+#define DIFF_META  5    /* anything outside a hunk: commit/author/date, the
+                           commit message, "--", trailers -- carries no marker
+                           column, so it is emitted verbatim */
+
+typedef struct {
+    MD_SIZE start, len;  /* the raw line inside r->code_buf */
+    int kind;
+    long lineno;         /* new-side line number, 0 = no number for this row */
+    const char* hl;      /* highlighted payload (marker stripped), or NULL */
+    MD_SIZE hl_len;
+} DIFF_LINE;
+
+/* Does the fence info string select the diff renderer? Accepted forms are
+ * "diff" / "patch", optionally naming the patched file's language as
+ * "diff c", "diff:c" or "patch=c". Returns 1 and fills `inner` (possibly with
+ * an empty string) when it does. */
+static int
+ansi_diff_info(const char* info, MD_SIZE size, char* inner, size_t inner_size)
+{
+    MD_SIZE i = 0, s;
+
+    inner[0] = '\0';
+    if(info == NULL)
+        return 0;
+    while(i < size && (info[i] == ' ' || info[i] == '\t'))
+        i++;
+    s = i;
+    while(i < size && info[i] != ' ' && info[i] != '\t' &&
+          info[i] != ':' && info[i] != '=')
+        i++;
+    if(!((i - s == 4 && memcmp(info + s, "diff", 4) == 0) ||
+         (i - s == 5 && memcmp(info + s, "patch", 5) == 0)))
+        return 0;
+
+    /* Optional inner language. */
+    while(i < size && (info[i] == ' ' || info[i] == '\t' ||
+                       info[i] == ':' || info[i] == '='))
+        i++;
+    s = i;
+    while(i < size && info[i] != ' ' && info[i] != '\t')
+        i++;
+    if(i > s && (size_t) (i - s) < inner_size) {
+        memcpy(inner, info + s, i - s);
+        inner[i - s] = '\0';
+    }
+    return 1;
+}
+
+/* Classify one raw diff line. `st` carries the scan state: whether we are
+ * inside a hunk body, and whether any +/- row has been seen yet.
+ *
+ * Only inside a hunk (or, for an informal snippet with no "@@" header, once a
+ * +/- row has appeared) does the first column carry a +/-/space marker. The
+ * preamble of a "git show" / "git format-patch" -- commit, Author:, Date:, the
+ * indented commit message, mail trailers -- carries no marker, and stripping
+ * one there would eat the first character of the text ("commit" -> "ommit"). */
+typedef struct { int in_hunk; int seen_change; } DIFF_SCAN;
+
+static int
+diff_classify(const char* p, MD_SIZE len, DIFF_SCAN* st)
+{
+    if(len >= 2 && p[0] == '@' && p[1] == '@') {
+        st->in_hunk = 1;
+        st->seen_change = 1;
+        return DIFF_HUNK;
+    }
+    if((len >= 3 && (memcmp(p, "+++", 3) == 0 || memcmp(p, "---", 3) == 0)) ||
+       (len >= 4 && memcmp(p, "diff", 4) == 0) ||
+       (len >= 5 && memcmp(p, "index", 5) == 0) ||
+       (len >= 1 && p[0] == '\\')) {
+        st->in_hunk = 0;
+        return DIFF_FILE;
+    }
+    if(len > 0 && p[0] == '+') {
+        st->seen_change = 1;
+        return DIFF_ADD;
+    }
+    if(len > 0 && p[0] == '-') {
+        st->seen_change = 1;
+        return DIFF_DEL;
+    }
+    /* A space-led line is a context row only once the block has shown itself
+     * to be diff body; before that it is preamble text (e.g. the indented
+     * commit message), which must not lose its first column. */
+    if(st->in_hunk || st->seen_change) {
+        if(len == 0 || p[0] == ' ')
+            return DIFF_CTX;
+        st->in_hunk = 0;      /* no marker inside a hunk: the hunk ended */
+    }
+    return DIFF_META;
+}
+
+/* New-side start line of a hunk header: "@@ -a,b +c,d @@" -> c (0 if absent). */
+static long
+diff_hunk_newline_start(const char* p, MD_SIZE len)
+{
+    MD_SIZE i;
+    for(i = 0; i + 1 < len; i++) {
+        if(p[i] == '+' && p[i+1] >= '0' && p[i+1] <= '9') {
+            long v = 0;
+            for(i++; i < len && p[i] >= '0' && p[i] <= '9'; i++)
+                v = v * 10 + (p[i] - '0');
+            return v;
+        }
+    }
+    return 0;
+}
+
+/* Extract the patched file's path from a "+++ b/path" / "--- a/path" header
+ * into `out` (NUL-terminated). Returns 1 on success. The a//b/ prefix and any
+ * trailing tab-separated metadata (timestamp) are stripped. */
+static int
+diff_header_path(const char* p, MD_SIZE len, char* out, size_t out_size)
+{
+    MD_SIZE i = 3, end;
+    while(i < len && (p[i] == ' ' || p[i] == '\t'))
+        i++;
+    if(i >= len)
+        return 0;
+    end = i;
+    while(end < len && p[end] != '\t')
+        end++;
+    while(end > i && p[end-1] == ' ')
+        end--;
+    if(end - i >= 2 && (p[i] == 'a' || p[i] == 'b') && p[i+1] == '/')
+        i += 2;
+    if(end <= i || (end - i) >= (MD_SIZE) out_size)
+        return 0;
+    if(end - i == 7 && memcmp(p + i, "dev/null", 7) == 0)
+        return 0;
+    memcpy(out, p + i, end - i);
+    out[end - i] = '\0';
+    return 1;
+}
+
+/* Emit `size` bytes of (possibly highlighted) payload, re-applying `bg` after
+ * any escape that would clear the row background (SGR 0 / 49). */
+static void
+render_diff_payload(MD_ANSI* r, const char* buf, MD_SIZE size, const char* bg)
+{
+    MD_SIZE i = 0, start = 0;
+
+    if(bg == NULL || bg[0] == '\0' || (r->flags & MD_ANSI_FLAG_NO_COLOR)) {
+        render_verbatim(r, buf, size);
+        return;
+    }
+    while(i < size) {
+        MD_SIZE e = ansi_esc_len(buf + i, size - i);
+        if(e == 0) { i++; continue; }
+        /* Only SGR sequences can touch the background; a reset (0/empty) or an
+         * explicit default-background (49) drops the band, so restore it. */
+        if(buf[i + e - 1] == 'm') {
+            const char* body = buf + i + 2;          /* after ESC '[' */
+            MD_SIZE blen = e - 3;
+            int clears = (blen == 0) ||
+                         (blen == 1 && body[0] == '0') ||
+                         (blen >= 2 && body[0] == '4' && body[1] == '9' &&
+                          (blen == 2 || body[2] == ';'));
+            if(!clears && blen >= 2) {
+                MD_SIZE k;
+                for(k = 0; k + 1 < blen; k++) {
+                    if(body[k] == ';' &&
+                       ((body[k+1] == '0' && (k + 2 == blen || body[k+2] == ';')) ||
+                        (body[k+1] == '4' && k + 2 < blen && body[k+2] == '9')))
+                        { clears = 1; break; }
+                }
+            }
+            if(clears) {
+                render_verbatim(r, buf + start, i + e - start);
+                RENDER_VERBATIM(r, bg);
+                start = i + e;
+            }
+        }
+        i += e;
+    }
+    if(size > start)
+        render_verbatim(r, buf + start, size - start);
+}
+
+#ifdef MD4C_WITH_FYTS
+/* Highlight the payload rows of one file segment of a diff -- lines[from:to),
+ * which all belong to the same patched file -- as `lang`, and point each row's
+ * `hl` slice into the returned buffer (which the caller frees).
+ *
+ * The rows are highlighted in a single pass over their concatenated,
+ * marker-stripped text so the grammar sees whole constructs rather than
+ * isolated lines. Returns NULL when the segment cannot be highlighted, leaving
+ * every `hl` NULL so the rows render as plain text. */
+static char*
+diff_highlight_segment(MD_ANSI* r, DIFF_LINE* lines, MD_SIZE from, MD_SIZE to,
+                       const char* lang, int avail)
+{
+    struct fyts_config cfg;
+    char* payload;
+    char* hl = NULL;
+    size_t hl_size = 0;
+    MD_SIZE i, payload_size = 0, want = 0, j, seen = 0;
+
+    if(lang == NULL || *lang == '\0' || !fyts_language_supported(lang))
+        return NULL;
+
+    for(i = from; i < to; i++)
+        if(lines[i].kind <= DIFF_DEL)
+            want++;
+    if(want == 0)
+        return NULL;
+
+    payload = (char*) malloc(r->code_size + want + 1);
+    if(payload == NULL)
+        return NULL;
+    for(i = from; i < to; i++) {
+        if(lines[i].kind > DIFF_DEL)
+            continue;
+        if(lines[i].len > 1) {
+            memcpy(payload + payload_size,
+                   r->code_buf + lines[i].start + 1, lines[i].len - 1);
+            payload_size += lines[i].len - 1;
+        }
+        payload[payload_size++] = '\n';
+    }
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.lang = lang;
+    cfg.color_mode = FYTS_COLOR_ON;
+    switch(r->style->code_background) {
+        case MD_STYLE_BG_DARK:  cfg.background_mode = FYTS_BACKGROUND_DARK;  break;
+        case MD_STYLE_BG_LIGHT: cfg.background_mode = FYTS_BACKGROUND_LIGHT; break;
+        default:                cfg.background_mode = FYTS_BACKGROUND_AUTO;  break;
+    }
+    if(r->style->code_theme != NULL && r->style->code_theme[0] != '\0') {
+        if(strchr(r->style->code_theme, '/') != NULL)
+            cfg.styling_path = r->style->code_theme;
+        else
+            cfg.styling_name = r->style->code_theme;
+    }
+    cfg.width = avail;   /* fyts clips each line to the content width */
+
+    /* The retained context is reused when the renderer has one (it is
+     * reconfigured per segment anyway); otherwise a throwaway context gives the
+     * same heap-buffer output without an output sink. */
+    if(r->fyts_ctx != NULL) {
+        if(*r->fyts_ctx != NULL && fyts_ctx_configure(*r->fyts_ctx, &cfg) != 0) {
+            fyts_ctx_destroy(*r->fyts_ctx);
+            *r->fyts_ctx = NULL;
+        }
+        if(*r->fyts_ctx == NULL)
+            *r->fyts_ctx = fyts_ctx_create(&cfg);
+        if(*r->fyts_ctx == NULL ||
+           fyts_ctx_highlight_source(*r->fyts_ctx, payload, payload_size,
+                                     &hl, &hl_size) != 0) {
+            free(hl);
+            hl = NULL;
+        }
+    } else {
+        struct fyts_ctx* ctx = fyts_ctx_create(&cfg);
+        if(ctx != NULL) {
+            if(fyts_ctx_highlight_source(ctx, payload, payload_size,
+                                         &hl, &hl_size) != 0) {
+                free(hl);
+                hl = NULL;
+            }
+            fyts_ctx_destroy(ctx);
+        }
+    }
+    free(payload);
+    if(hl == NULL)
+        return NULL;
+
+    /* Hand each row its own line of the highlighted text. A line-count
+     * mismatch means the mapping is untrustworthy, so drop it entirely. */
+    j = 0;
+    for(i = from; i < to && j <= (MD_SIZE) hl_size; i++) {
+        MD_SIZE end = j;
+        if(lines[i].kind > DIFF_DEL)
+            continue;
+        while(end < (MD_SIZE) hl_size && hl[end] != '\n')
+            end++;
+        lines[i].hl = hl + j;
+        lines[i].hl_len = end - j;
+        seen++;
+        j = end + 1;
+    }
+    if(seen != want || j < (MD_SIZE) hl_size) {
+        for(i = from; i < to; i++) {
+            lines[i].hl = NULL;
+            lines[i].hl_len = 0;
+        }
+        free(hl);
+        return NULL;
+    }
+    return hl;
+}
+
+/* Owned highlight buffers of a block (one per file segment). */
+typedef struct { char** v; MD_SIZE n, cap; } DIFF_BUFS;
+
+static void
+diff_bufs_free(DIFF_BUFS* b)
+{
+    MD_SIZE i;
+    for(i = 0; i < b->n; i++)
+        free(b->v[i]);
+    free(b->v);
+    b->v = NULL;
+    b->n = b->cap = 0;
+}
+
+/* Highlight one file segment and keep its buffer alive until the block is
+ * emitted. Any failure (unknown language, allocation) simply leaves the rows
+ * unhighlighted. */
+static void
+diff_flush_segment(MD_ANSI* r, DIFF_LINE* lines, MD_SIZE from, MD_SIZE to,
+                   const char* path, int avail, DIFF_BUFS* bufs)
+{
+    const char* lang;
+    char* detected = NULL;
+    char* hl;
+
+    if(r->code_diff_lang[0] != '\0') {
+        lang = r->code_diff_lang;          /* explicit info-string override */
+    } else {
+        if(path == NULL || path[0] == '\0')
+            return;
+        detected = fyts_detect_language_for_path(path);  /* heap */
+        lang = detected;
+    }
+    hl = diff_highlight_segment(r, lines, from, to, lang, avail);
+    free(detected);
+    if(hl == NULL)
+        return;
+    if(bufs->n == bufs->cap) {
+        MD_SIZE nc = bufs->cap ? bufs->cap * 2 : 8;
+        char** nv = (char**) realloc(bufs->v, nc * sizeof(*nv));
+        if(nv == NULL) {          /* cannot track it -- drop the highlighting */
+            MD_SIZE i;
+            for(i = from; i < to; i++) { lines[i].hl = NULL; lines[i].hl_len = 0; }
+            free(hl);
+            return;
+        }
+        bufs->v = nv;
+        bufs->cap = nc;
+    }
+    bufs->v[bufs->n++] = hl;
+}
+#endif /* MD4C_WITH_FYTS */
+
+/* Render the buffered code block as a GitHub-like unified diff: a new-side
+ * line-number gutter, a full-width background band per added/removed row, and
+ * the row content highlighted as the language of the file being patched.
+ * Returns 1 when the block was emitted, 0 to fall back to the normal paths. */
+static int
+emit_diff_code(MD_ANSI* r)
+{
+    DIFF_LINE* lines = NULL;
+    MD_SIZE n = 0, cap = 0, i, start;
+    long lineno = 0, maxno = 0;
+    DIFF_SCAN scan;
+    int gutter_w = 0, prefixw, avail, sepw = 0;
+    int numbers = r->style->diff_line_numbers;
+    char numbuf[24];
+#ifdef MD4C_WITH_FYTS
+    DIFF_BUFS bufs;
+#endif
+
+    scan.in_hunk = 0;
+    scan.seen_change = 0;
+#ifdef MD4C_WITH_FYTS
+    bufs.v = NULL;
+    bufs.n = bufs.cap = 0;
+#endif
+
+    if(r->code_size == 0)
+        return 0;
+
+    /* Split into lines and classify, tracking the new-side line number. */
+    for(i = 0; i <= r->code_size; i++) {
+        if(i < r->code_size && r->code_buf[i] != '\n')
+            continue;
+        if(n == cap) {
+            MD_SIZE nc = cap ? cap * 2 : 64;
+            DIFF_LINE* nl = (DIFF_LINE*) realloc(lines, nc * sizeof(*lines));
+            if(nl == NULL) { free(lines); return 0; }
+            lines = nl;
+            cap = nc;
+        }
+        start = (n == 0) ? 0 : lines[n-1].start + lines[n-1].len + 1;
+        lines[n].start = start;
+        lines[n].len = i - start;
+        lines[n].kind = diff_classify(r->code_buf + start, lines[n].len, &scan);
+        lines[n].lineno = 0;
+        lines[n].hl = NULL;
+        lines[n].hl_len = 0;
+        switch(lines[n].kind) {
+            case DIFF_HUNK:
+                lineno = diff_hunk_newline_start(r->code_buf + start, lines[n].len);
+                break;
+            case DIFF_ADD:
+            case DIFF_CTX:
+                if(lineno > 0) {
+                    lines[n].lineno = lineno++;
+                    if(lines[n].lineno > maxno)
+                        maxno = lines[n].lineno;
+                }
+                break;
+            default:
+                break;
+        }
+        n++;
+        if(i == r->code_size)
+            break;
+    }
+    if(n == 0) { free(lines); return 0; }
+
+    /* Gutter width: widest number in the block, at least 3 columns. */
+    if(numbers) {
+        gutter_w = 1;
+        while(maxno >= 10) { maxno /= 10; gutter_w++; }
+        if(gutter_w < 3)
+            gutter_w = 3;
+        sepw = ansi_disp_width(r->style->diff_gutter_sep,
+                               (MD_SIZE) strlen(r->style->diff_gutter_sep));
+    }
+
+    prefixw = ansi_disp_width(r->style->code_prefix,
+                              (MD_SIZE) strlen(r->style->code_prefix));
+    avail = (r->wrap_cols > 0)
+          ? r->wrap_cols - ansi_indent_width(r) - prefixw - DOC_MARGIN
+            - (numbers ? gutter_w + sepw + 1 : 0)
+          : 0;
+    if(r->wrap_cols > 0 && avail < 1)
+        avail = 1;
+
+#ifdef MD4C_WITH_FYTS
+    /* Highlight each file's rows as that file's own language: a patch touching
+     * several files carries a language per segment, so the block is split at
+     * every file header and highlighted a segment at a time. */
+    if(r->style->diff_inner_highlight && r->style->code_enabled &&
+       !(r->flags & MD_ANSI_FLAG_NO_COLOR)) {
+        MD_SIZE seg_start = 0;
+        char path[512];
+        int have_path = 0;
+
+        path[0] = '\0';
+        for(i = 0; i <= n; i++) {
+            const char* lp = (i < n) ? r->code_buf + lines[i].start : NULL;
+            MD_SIZE llen = (i < n) ? lines[i].len : 0;
+            int boundary = (i == n);
+
+            if(i < n && lines[i].kind == DIFF_FILE && llen >= 4) {
+                /* "diff --git ..." always opens a file; a "--- " does too, but
+                 * only once the current segment has already named its file. */
+                if(memcmp(lp, "diff", 4) == 0 ||
+                   (memcmp(lp, "---", 3) == 0 && have_path))
+                    boundary = 1;
+            }
+            if(boundary && i > seg_start) {
+                diff_flush_segment(r, lines, seg_start, i, path, avail, &bufs);
+                path[0] = '\0';
+                have_path = 0;
+                seg_start = i;
+            }
+            if(i == n)
+                break;
+            /* Record the segment's file: "+++ b/x" (the post-image) wins over
+             * "--- a/x", which may be /dev/null for a newly added file. */
+            if(lines[i].kind == DIFF_FILE && llen >= 4 &&
+               (memcmp(lp, "+++", 3) == 0 ||
+                (memcmp(lp, "---", 3) == 0 && !have_path))) {
+                if(diff_header_path(lp, llen, path, sizeof(path)))
+                    have_path = (lp[0] == '+');
+                else
+                    path[0] = '\0';
+            }
+        }
+    }
+#endif /* MD4C_WITH_FYTS */
+
+    /* Emit the rows. */
+    for(i = 0; i < n; i++) {
+        const char* lp = r->code_buf + lines[i].start;
+        MD_SIZE llen = lines[i].len;
+        const MD_STYLE_PAIR* row;
+        const char* body;
+        MD_SIZE body_len;
+        int w;
+
+        /* A trailing empty line is the block's final newline, not a row. */
+        if(i + 1 == n && llen == 0)
+            break;
+
+        switch(lines[i].kind) {
+            case DIFF_ADD:  row = &r->style->diff_added;   break;
+            case DIFF_DEL:  row = &r->style->diff_removed; break;
+            case DIFF_HUNK: row = &r->style->diff_hunk;    break;
+            case DIFF_FILE: row = &r->style->diff_file;    break;
+            case DIFF_META: row = &r->style->diff_context; break;
+            default:        row = &r->style->diff_context; break;
+        }
+
+        render_indent(r);
+        RENDER_VERBATIM(r, r->style->code_prefix);
+
+        if(numbers) {
+            int k, pad;
+            size_t nlen = 0;
+            if(lines[i].lineno > 0) {
+                long v = lines[i].lineno;
+                char tmp[24];
+                size_t t = 0;
+                while(v > 0) { tmp[t++] = (char) ('0' + (v % 10)); v /= 10; }
+                while(t > 0) numbuf[nlen++] = tmp[--t];
+            }
+            numbuf[nlen] = '\0';
+            pad = gutter_w - (int) nlen;
+            render_ansi(r, r->style->diff_gutter.on);
+            for(k = 0; k < pad; k++)
+                RENDER_VERBATIM(r, " ");
+            render_verbatim(r, numbuf, (MD_SIZE) nlen);
+            RENDER_VERBATIM(r, r->style->diff_gutter_sep);
+            render_ansi(r, r->style->diff_gutter.off);
+            RENDER_VERBATIM(r, " ");
+        }
+
+        /* Row content: the marker is kept, the payload may be highlighted. */
+        body = NULL;
+        body_len = 0;
+        if(lines[i].kind <= DIFF_DEL) {
+            if(lines[i].hl != NULL) {
+                body = lines[i].hl;
+                body_len = lines[i].hl_len;
+            } else if(llen > 1) {
+                body = lp + 1;
+                body_len = llen - 1;
+                if(avail > 0)
+                    body_len = ansi_clip_bytes(body, body_len, avail - 1);
+            }
+        } else {
+            body = lp;
+            body_len = llen;
+            if(avail > 0)
+                body_len = ansi_clip_bytes(body, body_len, avail);
+        }
+
+        render_ansi(r, row->on);
+        if(lines[i].kind <= DIFF_DEL) {
+            char marker = (lines[i].kind == DIFF_ADD) ? '+'
+                        : (lines[i].kind == DIFF_DEL) ? '-' : ' ';
+            render_verbatim(r, &marker, 1);
+            w = 1;
+        } else {
+            w = 0;
+        }
+        if(body_len > 0) {
+            render_diff_payload(r, body, body_len, row->on);
+            w += ansi_disp_width(body, body_len);
+        }
+        /* Pad the band out to the right margin so the row reads as one block. */
+        if(avail > 0 && row->on[0] != '\0' && !(r->flags & MD_ANSI_FLAG_NO_COLOR)) {
+            while(w < avail) { RENDER_VERBATIM(r, " "); w++; }
+        }
+        render_ansi(r, row->off);
+        render_newline(r);
+    }
+
+    free(lines);
+#ifdef MD4C_WITH_FYTS
+    diff_bufs_free(&bufs);
+#endif
+    return 1;
+}
+
 static int
 enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
 {
@@ -1993,6 +2576,8 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             r->code_highlight = 0;
             r->code_lang_size = 0;
             r->code_size = 0;
+            r->code_diff = 0;
+            r->code_diff_lang[0] = '\0';
             {
                 const MD_BLOCK_CODE_DETAIL* det = (const MD_BLOCK_CODE_DETAIL*) detail;
                 if(det->lang.text != NULL && det->lang.size > 0) {
@@ -2001,6 +2586,10 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                     memcpy(r->code_lang, det->lang.text, sz);
                     r->code_lang_size = sz;
                 }
+                if(r->style->diff_enabled)
+                    r->code_diff = ansi_diff_info(det->info.text, det->info.size,
+                                                  r->code_diff_lang,
+                                                  sizeof(r->code_diff_lang));
             }
 #ifdef MD4C_WITH_FYTS
             /* Highlight when the info string names a language libfyts supports;
@@ -2013,11 +2602,16 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                     r->code_highlight = 1;
             }
 #endif
+            /* A diff block is rendered by emit_diff_code() (never by the fyts
+             * "diff" grammar), so buffer its text regardless of fyts support. */
+            if(r->code_diff)
+                r->code_highlight = 1;
 
             /* Header rule (with the language label, when present). In reverse
              * mode the header is deferred to leave, where it is drawn on fyts's
              * frame background together with the code. */
-            if(!(r->code_highlight && r->style->code_reverse && !r->card))
+            if(!(r->code_highlight && !r->code_diff &&
+                 r->style->code_reverse && !r->card))
                 render_code_rule(r, r->code_lang, r->code_lang_size);
 
             if(r->flags & MD_ANSI_FLAG_CODE_META) {
@@ -2157,8 +2751,11 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
              * footer here), 2 = whole block (header+code+footer) already emitted. */
             int done = 0;
             if(r->code_highlight) {
+                if(r->code_diff)
+                    done = emit_diff_code(r);
 #ifdef MD4C_WITH_FYTS
-                done = emit_highlighted_code(r, 1);
+                if(!done)
+                    done = emit_highlighted_code(r, 1);
 #endif
                 if(done == 0) {
                     /* Fall back to plain. In reverse mode the header was deferred
@@ -2740,12 +3337,24 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
        render.code_lang_size > 0 && fyts_language_supported(render.code_lang))
         render.code_highlight = 1;
 #endif
+    /* "diff"/"patch" (with an optional inner language) gets the diff view,
+     * whether or not libfyts knows the language -- see emit_diff_code(). */
+    if((fence_flags & MD_ANSI_FENCE_HIGHLIGHT) && style->diff_enabled &&
+       ansi_diff_info(render.code_lang, render.code_lang_size,
+                      render.code_diff_lang, sizeof(render.code_diff_lang))) {
+        render.code_diff = 1;
+        render.code_highlight = 1;
+    }
 
-    if(styled && !(render.code_highlight && style->code_reverse && !render.card))
+    if(styled && !(render.code_highlight && !render.code_diff &&
+                   style->code_reverse && !render.card))
         render_code_rule(&render, render.code_lang, render.code_lang_size);
     if(render.code_highlight) {
+        if(render.code_diff)
+            done = emit_diff_code(&render);
 #ifdef MD4C_WITH_FYTS
-        done = emit_highlighted_code(&render, styled);
+        if(!done)
+            done = emit_highlighted_code(&render, styled);
 #endif
         if(done == 0) {
             if(styled && style->code_reverse && !render.card)

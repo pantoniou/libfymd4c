@@ -35,6 +35,14 @@ styles:
   link-url:       "\e[2;34m"   # dim blue
   card-dark:      "\e[48;2;40;42;46m"
   card-light:     "\e[48;2;232;232;232m"
+  bg-off:         "\e[49m"
+  diff-add-dark:  "\e[48;2;18;56;32m"
+  diff-add-light: "\e[48;2;209;250;219m"
+  diff-del-dark:  "\e[48;2;74;24;26m"
+  diff-del-light: "\e[48;2;255;215;215m"
+  diff-hunk-dark: "\e[48;2;28;38;58m\e[36m"
+  diff-hunk-light: "\e[48;2;219;229;255m\e[34m"
+  diff-hunk-off:  "\e[49m\e[39m"
 
 # Elements: each picks an "on"/"off" style by name. "light:" overrides on/off on
 # a light background.
@@ -56,6 +64,12 @@ elements:
   table_header_row: { on: "",     off: "" }
   table_row_odd:    { on: "",     off: "" }
   table_row_even:   { on: "",     off: "" }
+  diff_added:    { on: diff-add-dark,  off: bg-off, light: { on: diff-add-light, off: bg-off } }
+  diff_removed:  { on: diff-del-dark,  off: bg-off, light: { on: diff-del-light, off: bg-off } }
+  diff_context:  { on: "",             off: "" }
+  diff_hunk:     { on: diff-hunk-dark, off: diff-hunk-off, light: { on: diff-hunk-light, off: diff-hunk-off } }
+  diff_file:     { on: bold,      off: bold-off }
+  diff_gutter:   { on: dim,       off: dim-off }
   list_marker:   { on: dim,       off: dim-off }
   task_done:     { on: green,     off: default-fg, light: { on: black,  off: default-fg } }
   reverse:       { on: card-dark, off: reset, light: { on: card-light, off: reset } }
@@ -96,3 +110,9 @@ code:
     header: default       # default, empty to suppress, or a template
     footer: default       # templates substitute caller fy_generic {key} values
     prefix: "  "          # emitted before each fenced-code content row
+  # GitHub-like rendering of ```diff / ```patch blocks.
+  diff:
+    enabled:         true   # false: hand the block to the fyts "diff" grammar
+    line_numbers:    true   # new-side line-number gutter (blank on removals)
+    inner_highlight: true   # highlight payloads as the patched file's language
+    gutter: "│"             # glyph between the gutter and the content

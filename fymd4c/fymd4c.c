@@ -76,6 +76,9 @@ static const char* theme_name = NULL;
 static enum fymd_background forced_bg = FYMD_BG_AUTO;
 static enum fymd_sgr_input sgr_input = FYMD_SGR_STRIP;
 static int forced_reverse = 0;
+static int diff_view = 1;        /* GitHub-like ```diff rendering */
+static int diff_lines = 1;       /* line-number gutter in diff blocks */
+static int diff_highlight = 1;   /* highlight diff content as the patched file */
 static const char* forced_language = NULL; /* NULL => Markdown; "auto" => path */
 static int fence_style = 1;
 static int fence_style_set = 0;
@@ -521,6 +524,9 @@ enum {
     OPT_BACKGROUND,
     OPT_SGR,
     OPT_REVERSE,
+    OPT_DIFF,
+    OPT_DIFF_LINES,
+    OPT_DIFF_HIGHLIGHT,
     OPT_LANGUAGE,
     OPT_FENCE_STYLE,
     OPT_STREAM,
@@ -583,6 +589,9 @@ static const struct option long_options[] = {
     { "background",         required_argument, NULL, OPT_BACKGROUND },
     { "sgr",                required_argument, NULL, OPT_SGR },
     { "reverse",            no_argument,       NULL, OPT_REVERSE },
+    { "diff",               required_argument, NULL, OPT_DIFF },
+    { "diff-lines",         required_argument, NULL, OPT_DIFF_LINES },
+    { "diff-highlight",     required_argument, NULL, OPT_DIFF_HIGHLIGHT },
     { "language",           required_argument, NULL, OPT_LANGUAGE },
     { "fence-style",        required_argument, NULL, OPT_FENCE_STYLE },
     { "stream",             no_argument,       NULL, OPT_STREAM },
@@ -661,6 +670,9 @@ usage(void)
         "      --background=MODE  Background for light/dark styles: auto (default), dark, light\n"
         "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
         "      --reverse        Render the whole document as a card (background filled to width)\n"
+        "      --diff=on|off    GitHub-like rendering of ```diff blocks (default on)\n"
+        "      --diff-lines=on|off  Line-number gutter in diff blocks (default on)\n"
+      "      --diff-highlight=on|off  Highlight diff content as the patched file (default on)\n"
         "      --language=LANG  Render raw input as a fenced block; auto detects from FILE\n"
         "      --fence-style=MODE  Fenced block decoration: on (default) or off\n"
         "      --stream         Render incrementally (push mode)\n"
@@ -773,6 +785,23 @@ parse_args(int argc, char** argv)
                     exit(1);
                 }
                 break;
+
+            case OPT_DIFF:
+            case OPT_DIFF_LINES:
+            case OPT_DIFF_HIGHLIGHT: {
+                int on;
+                if(strcmp(optarg, "on") == 0)        on = 1;
+                else if(strcmp(optarg, "off") == 0)  on = 0;
+                else {
+                    fprintf(stderr, "Invalid --diff* value: %s (use on or off)\n",
+                            optarg);
+                    exit(1);
+                }
+                if(c == OPT_DIFF)            diff_view = on;
+                else if(c == OPT_DIFF_LINES) diff_lines = on;
+                else                           diff_highlight = on;
+                break;
+            }
 
             case OPT_TABLE_SIZE:
                 if(strcmp(optarg, "fit") == 0)
@@ -1013,6 +1042,9 @@ main(int argc, char** argv)
     if(table_fit_content)   cfg.flags |= FYMD_RF_TABLE_FIT;
     if(want_heal)           cfg.flags |= FYMD_RF_HEAL;
     if(forced_reverse)      cfg.flags |= FYMD_RF_REVERSE;
+    if(!diff_view)          cfg.flags |= FYMD_RF_NO_DIFF;
+    if(!diff_lines)         cfg.flags |= FYMD_RF_NO_DIFF_LINES;
+    if(!diff_highlight)     cfg.flags |= FYMD_RF_NO_DIFF_HL;
 
     r = fymd_renderer_create(&cfg);
     if(r == NULL) {

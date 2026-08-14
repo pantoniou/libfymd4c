@@ -232,7 +232,17 @@ region_ends_open_fence(const char* data, size_t size)
 static int
 lang_progressive_unsafe(const char* lang, size_t n)
 {
+    /* A diff/patch fence is rendered as a whole (line numbers come from the
+     * "@@" hunk header above, the content is highlighted as one unit), so an
+     * interior line committed on its own would not match the one-shot render. */
+    if((n >= 4 && memcmp(lang, "diff", 4) == 0 &&
+        (n == 4 || lang[4] == ':' || lang[4] == '=')) ||
+       (n >= 5 && memcmp(lang, "patch", 5) == 0 &&
+        (n == 5 || lang[5] == ':' || lang[5] == '=')))
+        return 1;
+
 #ifdef MD4C_WITH_FYTS
+    {
     char buf[64];
 
     if(n == 0 || n >= sizeof(buf))
@@ -240,9 +250,8 @@ lang_progressive_unsafe(const char* lang, size_t n)
     memcpy(buf, lang, n);
     buf[n] = '\0';
     return fyts_language_supported(buf) && !fyts_language_progressive_safe(buf);
+    }
 #else
-    (void) lang;
-    (void) n;
     return 0;
 #endif
 }

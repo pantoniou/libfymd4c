@@ -157,7 +157,7 @@ resolve_background(const char* mode)
 static void
 build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_OPTS* opts)
 {
-    fy_generic elements, glyphs, code, decoration, table, styles;
+    fy_generic elements, glyphs, code, decoration, table, styles, diff;
     fy_generic indicators;
     const char* bg;
     int light;
@@ -166,6 +166,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     glyphs   = fy_get(root, "glyphs",   fy_invalid);
     code     = fy_get(root, "code",     fy_invalid);
     decoration = fy_get(code, "decoration", fy_invalid);
+    diff     = fy_get(code, "diff",     fy_invalid);
     table    = fy_get(root, "table",    fy_invalid);
     styles   = fy_get(root, "styles",   fy_invalid);
     indicators = fy_get(root, "indicators", fy_invalid);
@@ -195,6 +196,18 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     LP("table_header_row", "",         "",         table_header_row);
     LP("table_row_odd",    "",         "",         table_row_odd);
     LP("table_row_even",   "",         "",         table_row_even);
+    /* Diff rows: background bands, so the "off" resets the background only.
+     * A theme that does not name them still gets bands matching its background. */
+    LP("diff_added",    light ? "\033[48;2;209;250;219m" : "\033[48;2;18;56;32m",
+                        "\033[49m", diff_added);
+    LP("diff_removed",  light ? "\033[48;2;255;215;215m" : "\033[48;2;74;24;26m",
+                        "\033[49m", diff_removed);
+    LP("diff_context",  "",                     "",         diff_context);
+    LP("diff_hunk",     light ? "\033[48;2;219;229;255m\033[34m"
+                              : "\033[48;2;28;38;58m\033[36m",
+                        "\033[49m\033[39m", diff_hunk);
+    LP("diff_file",     "\033[1m",    "\033[22m", diff_file);
+    LP("diff_gutter",   "\033[2m",    "\033[22m", diff_gutter);
     LP("list_marker",   "\033[2m",    "\033[22m", list_marker);
     LP("task_done",     "\033[32m",   "\033[39m", task_done);
     /* Whole-document card background (mirrors libfyts' frame background). */
@@ -217,6 +230,10 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     s->code_header  = load_str(reg, decoration, "header", "default");
     s->code_footer  = load_str(reg, decoration, "footer", "default");
     s->code_prefix  = load_str(reg, decoration, "prefix", "  ");
+    s->diff_enabled = (int) fy_get(diff, "enabled", (long) 1);
+    s->diff_line_numbers = (int) fy_get(diff, "line_numbers", (long) 1);
+    s->diff_inner_highlight = (int) fy_get(diff, "inner_highlight", (long) 1);
+    s->diff_gutter_sep = load_str(reg, diff, "gutter", "\xe2\x94\x82");
     bg = fy_get(code, "background", "auto");
     if(strcmp(bg, "dark") == 0)        s->code_background = MD_STYLE_BG_DARK;
     else if(strcmp(bg, "light") == 0)  s->code_background = MD_STYLE_BG_LIGHT;

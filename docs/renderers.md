@@ -143,6 +143,9 @@ one-shot and progressive language rendering.
 | `FYMD_RF_HEAL`         | Close dangling markers in the active/in-progress tail |
 | `FYMD_RF_REVERSE`      | Render the whole document as a card (theme background filled to width) |
 | `FYMD_RF_NO_CODE_HL`   | Disable fenced-code syntax highlighting           |
+| `FYMD_RF_NO_DIFF`      | Render ```` ```diff ```` blocks as ordinary code instead of a GitHub-like diff |
+| `FYMD_RF_NO_DIFF_LINES`| No line-number gutter in diff blocks              |
+| `FYMD_RF_NO_DIFF_HL`   | Do not highlight diff content as the patched file's language |
 
 `FYMD_RF_DEFAULT` is `FYMD_RF_HEAL`. `fymd_renderer_get_cfg()` returns the
 renderer's owned copy of the cfg; `fymd_detect_width()` resolves the auto width;
@@ -377,6 +380,11 @@ code:                # fenced-code highlighting (libfyts)
     header: default  # empty suppresses; templates substitute arbitrary {key} values
     footer: default
     prefix: "  "     # prefix before every fenced content row
+  diff:              # GitHub-like ```diff / ```patch rendering
+    enabled: true
+    line_numbers: true      # new-side gutter (blank on removed lines)
+    inner_highlight: true   # highlight rows as the patched file's language
+    gutter: "│"
 ```
 
 The `light:` sub-map of an element overrides its `on`/`off` on a light
@@ -385,6 +393,20 @@ variant is used. Specific "off" codes (e.g. `bold-off` = `\e[22m`) rather than a
 blanket reset keep nested styling intact. The `code:` block configures the
 libfyts highlighter; the language catalogue is the build-time
 `MD4C_FYTS_CATALOGUE` choice.
+
+A ```` ```diff ```` / ```` ```patch ```` fence is not handed to the tree-sitter
+`diff` grammar: it is rendered as a GitHub-like diff view -- a new-side
+line-number gutter derived from the `@@ -a,b +c,d @@` hunk headers (blank on
+removed lines), a full-width background band per added/removed/hunk row
+(`diff_added` / `diff_removed` / `diff_hunk` / `diff_file` / `diff_context` /
+`diff_gutter` elements), and row content highlighted as the language of the file
+being patched. That language comes from the `+++`/`---` header paths, or from an
+explicit info-string override: ```` ```diff c ````, ```` ```diff:c ````. CLI:
+`--diff=on|off`, `--diff-lines=on|off`, `--diff-highlight=on|off`.
+
+A bare patch file (no Markdown around it) gets the same view through the raw
+fenced-block path: `fymd4c --language=diff x.patch`, or `--language=auto`, which
+picks `diff` from the `.diff`/`.patch` extension.
 
 ## Heal Utility (`md4c-heal.h`)
 

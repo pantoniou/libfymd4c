@@ -4,6 +4,20 @@
 
 ## Fork additions (ANSI renderer / libfymd4c)
 
+  * ANSI renderer: `diff` / `patch` fenced blocks are rendered as a
+    GitHub-like diff view instead of being handed to the tree-sitter `diff`
+    grammar — a new-side line-number gutter derived from the `@@` hunk headers
+    (blank on removed lines), a full-width red/green background band per
+    removed/added row, and row content syntax-highlighted as the language of the
+    file being patched (detected from the `+++`/`---` paths, or forced with an
+    info-string override such as `diff c` or `diff:c`). Styled by the new `diff_added`, `diff_removed`,
+    `diff_context`, `diff_hunk`, `diff_file` and `diff_gutter` elements plus the
+    `code.diff` YAML section; toggled with `FYMD_RF_NO_DIFF`,
+    `FYMD_RF_NO_DIFF_LINES`, `FYMD_RF_NO_DIFF_HL` and the CLI's `--diff`,
+    `--diff-lines`, `--diff-highlight`. Diff fences are never committed
+    mid-block by the streaming front-end, so streamed output stays
+    byte-identical to the one-shot render.
+
   * Add **`libfymd4c`**, the one public opaque-typed library (libfyaml-style API).
     The md4c parser, entity table, HTML renderer, heal utility, ANSI renderer,
     YAML styling and streaming front-end are all compiled into it and hidden; it

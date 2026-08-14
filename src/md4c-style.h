@@ -48,6 +48,12 @@ typedef struct MD_ANSI_STYLE {
     MD_STYLE_PAIR table_header_row; /* styling spanning the complete header row */
     MD_STYLE_PAIR table_row_odd;    /* complete body rows, first body row is odd */
     MD_STYLE_PAIR table_row_even;
+    MD_STYLE_PAIR diff_added;    /* whole-row styling of a "+" diff line */
+    MD_STYLE_PAIR diff_removed;  /* whole-row styling of a "-" diff line */
+    MD_STYLE_PAIR diff_context;  /* whole-row styling of an unchanged diff line */
+    MD_STYLE_PAIR diff_hunk;     /* "@@ ... @@" hunk header row */
+    MD_STYLE_PAIR diff_file;     /* "--- a/x" / "+++ b/x" / "diff --git" rows */
+    MD_STYLE_PAIR diff_gutter;   /* the line-number column */
     MD_STYLE_PAIR list_marker;   /* list bullets / ordered numbers */
     MD_STYLE_PAIR task_done;     /* checked task-list marker */
     MD_STYLE_PAIR reverse;       /* whole-document card background (.on = bg set) */
@@ -76,6 +82,12 @@ typedef struct MD_ANSI_STYLE {
     const char*  code_header;    /* decoration template; "default" => legacy rule */
     const char*  code_footer;    /* decoration template; "default" => legacy rule */
     const char*  code_prefix;    /* prefix placed before every fenced content row */
+
+    /* GitHub-like rendering of ```diff / ```patch fenced blocks. */
+    int          diff_enabled;        /* 0: hand diff blocks to the fyts grammar */
+    int          diff_line_numbers;   /* draw the new-side line-number gutter */
+    int          diff_inner_highlight;/* highlight payloads as the patched file */
+    const char*  diff_gutter_sep;     /* glyph between gutter and content */
 
     void* _owned;                /* opaque heap-string registry */
 } MD_ANSI_STYLE;
