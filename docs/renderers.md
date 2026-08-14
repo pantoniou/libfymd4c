@@ -380,6 +380,7 @@ code:                # fenced-code highlighting (libfyts)
     header: default  # empty suppresses; templates substitute arbitrary {key} values
     footer: default
     prefix: "  "     # prefix before every fenced content row
+    marker: ""       # non-empty: prefix of the FIRST row only, rest indented
   diff:              # GitHub-like ```diff / ```patch rendering
     enabled: true
     line_numbers: true      # new-side gutter (blank on removed lines)
@@ -393,6 +394,22 @@ variant is used. Specific "off" codes (e.g. `bold-off` = `\e[22m`) rather than a
 blanket reset keep nested styling intact. The `code:` block configures the
 libfyts highlighter; the language catalogue is the build-time
 `MD4C_FYTS_CATALOGUE` choice.
+
+`code.decoration.marker` (cfg `code_marker`, CLI `--code-marker=STR`) gives a
+fenced block a hanging-indent shape instead of header/footer rules: the marker
+prefixes the **first** content row and the remaining rows are indented to its
+display width. With the rules suppressed (`header: ""`, `footer: ""`):
+
+```
+  ⎿  int main(int argc, char **argv)
+     {
+       return 0;
+     }
+```
+
+It applies to every fenced path -- plain, highlighted, the diff view and the raw
+`fymd_render_fenced_block()` -- but not to the `code.reverse` bubble, which
+frames its own background.
 
 A ```` ```diff ```` / ```` ```patch ```` fence is not handed to the tree-sitter
 `diff` grammar: it is rendered as a GitHub-like diff view -- a new-side

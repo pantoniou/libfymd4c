@@ -365,10 +365,12 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     r->cfg.style_path = fymd_strdup(cfg->style_path);
     r->cfg.theme = fymd_strdup(cfg->theme);
     r->cfg.code_theme = fymd_strdup(cfg->code_theme);
+    r->cfg.code_marker = fymd_strdup(cfg->code_marker);
     if((cfg->style && !r->cfg.style) ||
        (cfg->style_path && !r->cfg.style_path) ||
        (cfg->theme && !r->cfg.theme) ||
-       (cfg->code_theme && !r->cfg.code_theme))
+       (cfg->code_theme && !r->cfg.code_theme) ||
+       (cfg->code_marker && !r->cfg.code_marker))
         goto err;
 
     /* Build the styling context once. */
@@ -397,6 +399,8 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     /* Apply post-build style overrides that the YAML loader does not take. */
     if(cfg->flags & FYMD_RF_NO_CODE_HL)
         r->style->code_enabled = 0;
+    if(r->cfg.code_marker != NULL)
+        r->style->code_marker = r->cfg.code_marker;  /* owned by cfg */
     if(r->cfg.code_theme != NULL) {
         r->style->code_theme = r->cfg.code_theme; /* owned by cfg; freed there */
         r->style->code_enabled = (cfg->flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;
@@ -448,6 +452,7 @@ fymd_renderer_destroy(struct fymd_renderer *r)
     free((void *) r->cfg.style_path);
     free((void *) r->cfg.theme);
     free((void *) r->cfg.code_theme);
+    free((void *) r->cfg.code_marker);
     free(r->limit_separator);
     fymd_buf_fini(&r->screen);
     fymd_buf_fini(&r->visible);
@@ -579,6 +584,8 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
     }
     if(r->cfg.flags & FYMD_RF_NO_CODE_HL)
         style->code_enabled = 0;
+    if(r->cfg.code_marker != NULL)
+        style->code_marker = r->cfg.code_marker;
     if(r->cfg.code_theme != NULL) {
         style->code_theme = r->cfg.code_theme;
         style->code_enabled = (r->cfg.flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;

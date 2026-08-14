@@ -82,6 +82,10 @@ typedef struct MD_ANSI_STYLE {
     const char*  code_header;    /* decoration template; "default" => legacy rule */
     const char*  code_footer;    /* decoration template; "default" => legacy rule */
     const char*  code_prefix;    /* prefix placed before every fenced content row */
+    const char*  code_marker;    /* non-empty: prefix of the FIRST content row
+                                    only (e.g. "\u23bf "); the remaining rows use
+                                    code_prefix padded to the marker's width, so
+                                    the block reads as one hanging-indent item */
 
     /* GitHub-like rendering of ```diff / ```patch fenced blocks. */
     int          diff_enabled;        /* 0: hand diff blocks to the fyts grammar */

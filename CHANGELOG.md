@@ -4,6 +4,15 @@
 
 ## Fork additions (ANSI renderer / libfymd4c)
 
+  * ANSI renderer: fenced blocks can be marked instead of ruled.
+    `code.decoration.marker` (renderer cfg `code_marker`, CLI
+    `--code-marker=STR`) prefixes the **first** content row with the given
+    string and indents the remaining rows to its display width, giving a
+    hanging-indent block when the header/footer decorations are suppressed.
+    Applies to the plain, highlighted, diff and raw fenced paths; the
+    `code.reverse` bubble keeps framing its own background. Empty by default,
+    so existing output is unchanged.
+
   * ANSI renderer: `diff` / `patch` fenced blocks are rendered as a
     GitHub-like diff view instead of being handed to the tree-sitter `diff`
     grammar — a new-side line-number gutter derived from the `@@` hunk headers

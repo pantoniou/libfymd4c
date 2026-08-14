@@ -139,6 +139,10 @@ struct fymd_renderer_cfg {
     enum fymd_background background;
     enum fymd_sgr_input sgr_input; /* input-escape policy; default FYMD_SGR_STRIP */
     const char *code_theme;     /* libfyts styling name/path; NULL => theme default */
+    const char *code_marker;    /* non-NULL: prefix the FIRST row of a fenced
+                                   block with this (e.g. "\u23bf  ") and indent
+                                   the remaining rows to the same width; "" or
+                                   NULL keeps the styling's own setting */
     enum fymd_table_border table_border; /* override theme table.border; default THEME */
     void *userdata;             /* opaque, propagated to fymd_renderer_get_cfg() */
 };

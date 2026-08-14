@@ -1710,6 +1710,58 @@ ansi_clip_bytes(const char* buf, MD_SIZE size, int width)
     return i;
 }
 
+/* Width reserved before fenced content: the marker and the continuation prefix
+ * are padded to a common column, so both are accounted for. */
+static int
+code_prefix_width(MD_ANSI* r)
+{
+    int pw = ansi_disp_width(r->style->code_prefix,
+                             (MD_SIZE) strlen(r->style->code_prefix));
+    int mw;
+    if(r->style->code_marker == NULL || r->style->code_marker[0] == '\0')
+        return pw;
+    mw = ansi_disp_width(r->style->code_marker,
+                         (MD_SIZE) strlen(r->style->code_marker));
+    return mw > pw ? mw : pw;
+}
+
+/* Prefix of one fenced-content row. Without code.decoration.marker every row
+ * gets code_prefix, as before. With a marker the FIRST row carries it and the
+ * rest are code_prefix padded out to the marker's width, so the block reads as
+ * one hanging-indent item:
+ *
+ *     |- int main(void)
+ *        {
+ *            return 0;
+ *        }
+ *
+ * `pad` is caller-provided scratch for the padded continuation prefix. */
+static const char*
+code_row_prefix(MD_ANSI* r, int first, char* pad, size_t pad_size)
+{
+    const char* marker = r->style->code_marker;
+    const char* prefix = r->style->code_prefix;
+    size_t n;
+    int mw, pw, i;
+
+    if(marker == NULL || marker[0] == '\0')
+        return prefix;
+    if(first)
+        return marker;
+    mw = ansi_disp_width(marker, (MD_SIZE) strlen(marker));
+    pw = ansi_disp_width(prefix, (MD_SIZE) strlen(prefix));
+    if(pw >= mw)
+        return prefix;
+    n = strlen(prefix);
+    if(n + (size_t)(mw - pw) >= pad_size)
+        return prefix;
+    memcpy(pad, prefix, n);
+    for(i = 0; i < mw - pw; i++)
+        pad[n + i] = ' ';
+    pad[n + (mw - pw)] = '\0';
+    return pad;
+}
+
 /* Emit the buffered code block as plain dim text (the pre-highlighting path,
  * also the fallback when highlighting is unavailable or fails). Long lines are
  * clipped to the prose right margin (like glow); wrap_cols == 0 = no clip. */
@@ -1717,8 +1769,9 @@ static void
 emit_plain_code(MD_ANSI* r)
 {
     MD_SIZE i, start = 0;
-    int prefixw = ansi_disp_width(r->style->code_prefix,
-                                  (MD_SIZE)strlen(r->style->code_prefix));
+    int first = 1;
+    char pad[64];
+    int prefixw = code_prefix_width(r);
     int avail = (r->wrap_cols > 0)
                 ? r->wrap_cols - ansi_indent_width(r) - prefixw - DOC_MARGIN : 0;
     if(r->wrap_cols > 0 && avail < 1) avail = 1;
@@ -1733,7 +1786,8 @@ emit_plain_code(MD_ANSI* r)
             if(i > start) {
                 MD_SIZE len = i - start;
                 render_indent(r);
-                RENDER_VERBATIM(r, r->style->code_prefix);
+                RENDER_VERBATIM(r, code_row_prefix(r, first, pad, sizeof(pad)));
+                first = 0;
                 if(avail > 0)
                     len = ansi_clip_bytes(r->code_buf + start, len, avail);
                 render_verbatim(r, r->code_buf + start, len);
@@ -1776,6 +1830,13 @@ emit_highlighted_code(MD_ANSI* r, int styled)
     /* The fenced-code bubble is a special case: in whole-document card mode it
      * is suppressed, so code is highlighted normally and sits on the card. */
     int rc, reverse = styled && r->style->code_reverse && !r->card;
+    /* With a first-row marker the per-line prefix varies, which fyts's constant
+     * line_prefix cannot express: take its output as a buffer and lay the rows
+     * out here instead. The bubble (reverse) mode frames its own background and
+     * keeps the constant-prefix path. */
+    int marker_mode = styled && !reverse &&
+                      r->style->code_marker != NULL &&
+                      r->style->code_marker[0] != '\0';
     /* Clip width for fyts: 0 (no wrap / MD_ANSI_WIDTH_INF) means no clipping,
      * matching prose. fyts subtracts the line_prefix (indent + 2-space margin)
      * itself, so reserving DOC_MARGIN here lands the content inside the rule box.
@@ -1783,6 +1844,13 @@ emit_highlighted_code(MD_ANSI* r, int styled)
      * to the terminal width separately. */
     int clip_width = (r->wrap_cols > 0)
                    ? r->wrap_cols - (styled ? DOC_MARGIN : 0) : 0;
+
+    if(marker_mode && r->wrap_cols > 0) {
+        clip_width = r->wrap_cols - ansi_indent_width(r)
+                   - code_prefix_width(r) - DOC_MARGIN;
+        if(clip_width < 1)
+            clip_width = 1;
+    }
 
     if(r->code_lang_size == 0 || r->code_size == 0)
         return 0;
@@ -1796,7 +1864,7 @@ emit_highlighted_code(MD_ANSI* r, int styled)
     saved_ud = r->userdata;
     r->process_output = ansi_capture_append;
     r->userdata = &cap;
-    if(styled) {
+    if(styled && !marker_mode) {
         render_indent(r);
         RENDER_VERBATIM(r, r->style->code_prefix);
     }
@@ -1856,23 +1924,53 @@ emit_highlighted_code(MD_ANSI* r, int styled)
         cfg.epilog = footer;
     }
 
-    if(r->fyts_ctx != NULL) {
+    if(marker_mode || r->fyts_ctx != NULL) {
         char* output = NULL;
         size_t output_len = 0;
-        if(*r->fyts_ctx != NULL && fyts_ctx_configure(*r->fyts_ctx, &cfg) != 0) {
-            fyts_ctx_destroy(*r->fyts_ctx);
-            *r->fyts_ctx = NULL;
+        struct fyts_ctx* own = NULL;
+        /* Without a retained context (one-shot renders) a throwaway one gives
+         * the same heap-buffer output. */
+        struct fyts_ctx** ctxp = (r->fyts_ctx != NULL) ? r->fyts_ctx : &own;
+
+        if(*ctxp != NULL && fyts_ctx_configure(*ctxp, &cfg) != 0) {
+            fyts_ctx_destroy(*ctxp);
+            *ctxp = NULL;
         }
-        if(*r->fyts_ctx == NULL)
-            *r->fyts_ctx = fyts_ctx_create(&cfg);
-        if(*r->fyts_ctx == NULL ||
-           fyts_ctx_highlight_source(*r->fyts_ctx, r->code_buf, r->code_size,
+        if(*ctxp == NULL)
+            *ctxp = fyts_ctx_create(&cfg);
+        if(*ctxp == NULL ||
+           fyts_ctx_highlight_source(*ctxp, r->code_buf, r->code_size,
                                      &output, &output_len) != 0) {
             free(output);
+            if(own != NULL)
+                fyts_ctx_destroy(own);
             return 0;
         }
-        render_verbatim(r, output, (MD_SIZE) output_len);
+        if(marker_mode) {
+            /* Lay out the highlighted rows: marker on the first, the padded
+             * continuation prefix on the rest. */
+            size_t ls = 0, i2;
+            int first = 1;
+            char pad[64];
+            for(i2 = 0; i2 <= output_len; i2++) {
+                if(i2 < output_len && output[i2] != '\n')
+                    continue;
+                if(i2 == output_len && i2 == ls)
+                    break;                       /* trailing newline, no row */
+                render_indent(r);
+                RENDER_VERBATIM(r, code_row_prefix(r, first, pad, sizeof(pad)));
+                first = 0;
+                if(i2 > ls)
+                    render_verbatim(r, output + ls, (MD_SIZE)(i2 - ls));
+                render_newline(r);
+                ls = i2 + 1;
+            }
+        } else {
+            render_verbatim(r, output, (MD_SIZE) output_len);
+        }
         free(output);
+        if(own != NULL)
+            fyts_ctx_destroy(own);
         rc = 0;
     } else {
         rc = fyts_highlight_source(&cfg, r->code_buf, r->code_size);
@@ -2252,6 +2350,8 @@ emit_diff_code(MD_ANSI* r)
     DIFF_SCAN scan;
     int gutter_w = 0, prefixw, avail, sepw = 0;
     int numbers = r->style->diff_line_numbers;
+    int first_row = 1;
+    char pad[64];
     char numbuf[24];
 #ifdef MD4C_WITH_FYTS
     DIFF_BUFS bufs;
@@ -2316,8 +2416,7 @@ emit_diff_code(MD_ANSI* r)
                                (MD_SIZE) strlen(r->style->diff_gutter_sep));
     }
 
-    prefixw = ansi_disp_width(r->style->code_prefix,
-                              (MD_SIZE) strlen(r->style->code_prefix));
+    prefixw = code_prefix_width(r);
     avail = (r->wrap_cols > 0)
           ? r->wrap_cols - ansi_indent_width(r) - prefixw - DOC_MARGIN
             - (numbers ? gutter_w + sepw + 1 : 0)
@@ -2393,7 +2492,8 @@ emit_diff_code(MD_ANSI* r)
         }
 
         render_indent(r);
-        RENDER_VERBATIM(r, r->style->code_prefix);
+        RENDER_VERBATIM(r, code_row_prefix(r, first_row, pad, sizeof(pad)));
+        first_row = 0;
 
         if(numbers) {
             int k, pad;
@@ -3209,9 +3309,9 @@ static void
 emit_raw_code(MD_ANSI* r, int styled)
 {
     MD_SIZE start = 0, end;
-    int avail = 0;
-    int prefixw = ansi_disp_width(r->style->code_prefix,
-                                  (MD_SIZE)strlen(r->style->code_prefix));
+    int avail = 0, first = 1;
+    char pad[64];
+    int prefixw = code_prefix_width(r);
 
     if(styled) {
         avail = (r->wrap_cols > 0)
@@ -3230,7 +3330,8 @@ emit_raw_code(MD_ANSI* r, int styled)
         len = end - start;
         if(styled) {
             render_indent(r);
-            RENDER_VERBATIM(r, r->style->code_prefix);
+            RENDER_VERBATIM(r, code_row_prefix(r, first, pad, sizeof(pad)));
+            first = 0;
         }
         if(avail > 0)
             len = ansi_clip_bytes(r->code_buf + start, len, avail);

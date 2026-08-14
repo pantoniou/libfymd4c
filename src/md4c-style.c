@@ -230,6 +230,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     s->code_header  = load_str(reg, decoration, "header", "default");
     s->code_footer  = load_str(reg, decoration, "footer", "default");
     s->code_prefix  = load_str(reg, decoration, "prefix", "  ");
+    s->code_marker  = load_str(reg, decoration, "marker", "");
     s->diff_enabled = (int) fy_get(diff, "enabled", (long) 1);
     s->diff_line_numbers = (int) fy_get(diff, "line_numbers", (long) 1);
     s->diff_inner_highlight = (int) fy_get(diff, "inner_highlight", (long) 1);

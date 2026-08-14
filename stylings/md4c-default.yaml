@@ -110,6 +110,8 @@ code:
     header: default       # default, empty to suppress, or a template
     footer: default       # templates substitute caller fy_generic {key} values
     prefix: "  "          # emitted before each fenced-code content row
+    marker: ""            # non-empty (e.g. "⎿  ") marks the FIRST content row
+                          # only; the rest are indented to the same width
   # GitHub-like rendering of ```diff / ```patch blocks.
   diff:
     enabled:         true   # false: hand the block to the fyts "diff" grammar
