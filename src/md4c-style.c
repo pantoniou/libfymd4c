@@ -5,6 +5,7 @@
  * ANSI renderer styling configuration (YAML, via libfyaml).
  */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -225,15 +226,16 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     s->table_cross      = load_str(reg, glyphs, "table_cross",      "\xe2\x94\xbc");
     s->table_border_none = strcmp(fy_get(table, "border", "grid"), "none") == 0;
 
-    s->code_enabled = (int) fy_get(code, "enabled", (long) 1);
+    s->code_enabled = fy_get(code, "enabled", (_Bool) true);
     s->code_theme   = load_str(reg, code, "theme", "default");
     s->code_header  = load_str(reg, decoration, "header", "default");
     s->code_footer  = load_str(reg, decoration, "footer", "default");
     s->code_prefix  = load_str(reg, decoration, "prefix", "  ");
-    s->code_marker  = load_str(reg, decoration, "marker", "");
-    s->diff_enabled = (int) fy_get(diff, "enabled", (long) 1);
-    s->diff_line_numbers = (int) fy_get(diff, "line_numbers", (long) 1);
-    s->diff_inner_highlight = (int) fy_get(diff, "inner_highlight", (long) 1);
+    s->code_marker  = load_str(reg, decoration, "marker", "\xe2\x8e\xbf  ");
+    s->code_marker_enabled = fy_get(decoration, "marker_enabled", (_Bool) false);
+    s->diff_enabled = fy_get(diff, "enabled", (_Bool) true);
+    s->diff_line_numbers = fy_get(diff, "line_numbers", (_Bool) true);
+    s->diff_inner_highlight = fy_get(diff, "inner_highlight", (_Bool) true);
     s->diff_gutter_sep = load_str(reg, diff, "gutter", "\xe2\x94\x82");
     bg = fy_get(code, "background", "auto");
     if(strcmp(bg, "dark") == 0)        s->code_background = MD_STYLE_BG_DARK;
@@ -243,7 +245,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     if(opts != NULL && opts->reverse >= 0)
         s->code_reverse = opts->reverse;
     else
-        s->code_reverse = (int) fy_get(code, "reverse", (long) 0);
+        s->code_reverse = fy_get(code, "reverse", (_Bool) false);
 }
 
 /* Allocate a style + its owned-string registry. Returns NULL on alloc failure. */

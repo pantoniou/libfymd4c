@@ -399,8 +399,14 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     /* Apply post-build style overrides that the YAML loader does not take. */
     if(cfg->flags & FYMD_RF_NO_CODE_HL)
         r->style->code_enabled = 0;
-    if(r->cfg.code_marker != NULL)
+    if(r->cfg.code_marker != NULL) {
         r->style->code_marker = r->cfg.code_marker;  /* owned by cfg */
+        r->style->code_marker_enabled = 1;
+    }
+    if(cfg->flags & FYMD_RF_CODE_MARKER)
+        r->style->code_marker_enabled = 1;
+    if(cfg->flags & FYMD_RF_NO_CODE_MARKER)
+        r->style->code_marker_enabled = 0;
     if(r->cfg.code_theme != NULL) {
         r->style->code_theme = r->cfg.code_theme; /* owned by cfg; freed there */
         r->style->code_enabled = (cfg->flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;
@@ -584,8 +590,14 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
     }
     if(r->cfg.flags & FYMD_RF_NO_CODE_HL)
         style->code_enabled = 0;
-    if(r->cfg.code_marker != NULL)
+    if(r->cfg.code_marker != NULL) {
         style->code_marker = r->cfg.code_marker;
+        style->code_marker_enabled = 1;
+    }
+    if(r->cfg.flags & FYMD_RF_CODE_MARKER)
+        style->code_marker_enabled = 1;
+    if(r->cfg.flags & FYMD_RF_NO_CODE_MARKER)
+        style->code_marker_enabled = 0;
     if(r->cfg.code_theme != NULL) {
         style->code_theme = r->cfg.code_theme;
         style->code_enabled = (r->cfg.flags & FYMD_RF_NO_CODE_HL) ? 0 : 1;

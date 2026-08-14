@@ -10,8 +10,16 @@
     string and indents the remaining rows to its display width, giving a
     hanging-indent block when the header/footer decorations are suppressed.
     Applies to the plain, highlighted, diff and raw fenced paths; the
-    `code.reverse` bubble keeps framing its own background. Empty by default,
-    so existing output is unchanged.
+    `code.reverse` bubble keeps framing its own background. The marker string
+    lives in the styling and is **off** by default: switch it on per render with
+    `FYMD_RF_CODE_MARKER` / `--marker=on`, or in the styling with
+    `marker_enabled: true`; `FYMD_RF_NO_CODE_MARKER` / `--marker=off` switches a
+    configured one back off.
+
+  * md4c-style: fix YAML booleans being ignored. `fy_get()` with an integer
+    default does not coerce a boolean generic, so `code.enabled: false` (and
+    `code.reverse`) silently kept the default. Booleans, integers and the
+    spelled-out forms (true/false, yes/no, on/off) are all accepted now.
 
   * ANSI renderer: `diff` / `patch` fenced blocks are rendered as a
     GitHub-like diff view instead of being handed to the tree-sitter `diff`

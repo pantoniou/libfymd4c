@@ -77,6 +77,7 @@ static enum fymd_background forced_bg = FYMD_BG_AUTO;
 static enum fymd_sgr_input sgr_input = FYMD_SGR_STRIP;
 static int forced_reverse = 0;
 static const char* code_marker = NULL;
+static int marker_mode = -1;     /* -1 = styling decides, 0 = off, 1 = on */
 static int diff_view = 1;        /* GitHub-like ```diff rendering */
 static int diff_lines = 1;       /* line-number gutter in diff blocks */
 static int diff_highlight = 1;   /* highlight diff content as the patched file */
@@ -526,6 +527,7 @@ enum {
     OPT_SGR,
     OPT_REVERSE,
     OPT_CODE_MARKER,
+    OPT_MARKER,
     OPT_DIFF,
     OPT_DIFF_LINES,
     OPT_DIFF_HIGHLIGHT,
@@ -592,6 +594,7 @@ static const struct option long_options[] = {
     { "sgr",                required_argument, NULL, OPT_SGR },
     { "reverse",            no_argument,       NULL, OPT_REVERSE },
     { "code-marker",        required_argument, NULL, OPT_CODE_MARKER },
+    { "marker",             required_argument, NULL, OPT_MARKER },
     { "diff",               required_argument, NULL, OPT_DIFF },
     { "diff-lines",         required_argument, NULL, OPT_DIFF_LINES },
     { "diff-highlight",     required_argument, NULL, OPT_DIFF_HIGHLIGHT },
@@ -673,6 +676,8 @@ usage(void)
         "      --background=MODE  Background for light/dark styles: auto (default), dark, light\n"
         "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
         "      --reverse        Render the whole document as a card (background filled to width)\n"
+        "      --marker=on|off  Switch the styling's fenced-block first-row marker\n"
+        "                       on or off for this render\n"
         "      --code-marker=STR  Mark the first row of a fenced block with STR and\n"
         "                       indent the rest to the same width (e.g. '\u23bf  ')\n"
         "      --diff=on|off    GitHub-like rendering of ```diff blocks (default on)\n"
@@ -793,6 +798,7 @@ parse_args(int argc, char** argv)
 
             case OPT_CODE_MARKER: code_marker = optarg; break;
 
+            case OPT_MARKER:
             case OPT_DIFF:
             case OPT_DIFF_LINES:
             case OPT_DIFF_HIGHLIGHT: {
@@ -800,11 +806,12 @@ parse_args(int argc, char** argv)
                 if(strcmp(optarg, "on") == 0)        on = 1;
                 else if(strcmp(optarg, "off") == 0)  on = 0;
                 else {
-                    fprintf(stderr, "Invalid --diff* value: %s (use on or off)\n",
+                    fprintf(stderr, "Invalid on/off value: %s (use on or off)\n",
                             optarg);
                     exit(1);
                 }
-                if(c == OPT_DIFF)            diff_view = on;
+                if(c == OPT_MARKER)          marker_mode = on;
+                else if(c == OPT_DIFF)       diff_view = on;
                 else if(c == OPT_DIFF_LINES) diff_lines = on;
                 else                           diff_highlight = on;
                 break;
@@ -1050,6 +1057,8 @@ main(int argc, char** argv)
     if(want_heal)           cfg.flags |= FYMD_RF_HEAL;
     if(forced_reverse)      cfg.flags |= FYMD_RF_REVERSE;
     cfg.code_marker = code_marker;
+    if(marker_mode == 1)    cfg.flags |= FYMD_RF_CODE_MARKER;
+    else if(marker_mode == 0) cfg.flags |= FYMD_RF_NO_CODE_MARKER;
     if(!diff_view)          cfg.flags |= FYMD_RF_NO_DIFF;
     if(!diff_lines)         cfg.flags |= FYMD_RF_NO_DIFF_LINES;
     if(!diff_highlight)     cfg.flags |= FYMD_RF_NO_DIFF_HL;

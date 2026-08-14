@@ -82,6 +82,9 @@ typedef struct MD_ANSI_STYLE {
     const char*  code_header;    /* decoration template; "default" => legacy rule */
     const char*  code_footer;    /* decoration template; "default" => legacy rule */
     const char*  code_prefix;    /* prefix placed before every fenced content row */
+    int          code_marker_enabled; /* use code_marker (off by default, so the
+                                         config can carry a marker that callers
+                                         switch on per render) */
     const char*  code_marker;    /* non-empty: prefix of the FIRST content row
                                     only (e.g. "\u23bf "); the remaining rows use
                                     code_prefix padded to the marker's width, so

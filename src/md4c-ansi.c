@@ -1710,6 +1710,16 @@ ansi_clip_bytes(const char* buf, MD_SIZE size, int width)
     return i;
 }
 
+/* Is the first-row marker in play? The styling may carry a marker while leaving
+ * it switched off, so both the flag and a non-empty string are required. */
+static int
+code_marker_active(MD_ANSI* r)
+{
+    return r->style->code_marker_enabled &&
+           r->style->code_marker != NULL &&
+           r->style->code_marker[0] != '\0';
+}
+
 /* Width reserved before fenced content: the marker and the continuation prefix
  * are padded to a common column, so both are accounted for. */
 static int
@@ -1718,7 +1728,7 @@ code_prefix_width(MD_ANSI* r)
     int pw = ansi_disp_width(r->style->code_prefix,
                              (MD_SIZE) strlen(r->style->code_prefix));
     int mw;
-    if(r->style->code_marker == NULL || r->style->code_marker[0] == '\0')
+    if(!code_marker_active(r))
         return pw;
     mw = ansi_disp_width(r->style->code_marker,
                          (MD_SIZE) strlen(r->style->code_marker));
@@ -1744,7 +1754,7 @@ code_row_prefix(MD_ANSI* r, int first, char* pad, size_t pad_size)
     size_t n;
     int mw, pw, i;
 
-    if(marker == NULL || marker[0] == '\0')
+    if(!code_marker_active(r))
         return prefix;
     if(first)
         return marker;
@@ -1834,9 +1844,7 @@ emit_highlighted_code(MD_ANSI* r, int styled)
      * line_prefix cannot express: take its output as a buffer and lay the rows
      * out here instead. The bubble (reverse) mode frames its own background and
      * keeps the constant-prefix path. */
-    int marker_mode = styled && !reverse &&
-                      r->style->code_marker != NULL &&
-                      r->style->code_marker[0] != '\0';
+    int marker_mode = styled && !reverse && code_marker_active(r);
     /* Clip width for fyts: 0 (no wrap / MD_ANSI_WIDTH_INF) means no clipping,
      * matching prose. fyts subtracts the line_prefix (indent + 2-space margin)
      * itself, so reserving DOC_MARGIN here lands the content inside the rule box.

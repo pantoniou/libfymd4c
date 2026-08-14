@@ -76,8 +76,11 @@ enum fymd_cfg_flags {
     FYMD_RF_NO_DIFF      = FYMD_BIT(6), /* render ```diff blocks as plain code
                                            instead of a GitHub-like diff view */
     FYMD_RF_NO_DIFF_LINES = FYMD_BIT(7),/* no line-number gutter in diff blocks */
-    FYMD_RF_NO_DIFF_HL   = FYMD_BIT(8)  /* do not highlight diff content as the
+    FYMD_RF_NO_DIFF_HL   = FYMD_BIT(8), /* do not highlight diff content as the
                                            language of the patched file */
+    FYMD_RF_CODE_MARKER  = FYMD_BIT(9), /* switch the styling's fenced-block
+                                           first-row marker on for this render */
+    FYMD_RF_NO_CODE_MARKER = FYMD_BIT(10) /* ... or off, whatever it configures */
 };
 
 /* Sensible default flags: heal the in-progress tail. */
@@ -139,10 +142,10 @@ struct fymd_renderer_cfg {
     enum fymd_background background;
     enum fymd_sgr_input sgr_input; /* input-escape policy; default FYMD_SGR_STRIP */
     const char *code_theme;     /* libfyts styling name/path; NULL => theme default */
-    const char *code_marker;    /* non-NULL: prefix the FIRST row of a fenced
-                                   block with this (e.g. "\u23bf  ") and indent
-                                   the remaining rows to the same width; "" or
-                                   NULL keeps the styling's own setting */
+    const char *code_marker;    /* override the styling's first-row marker
+                                   string (e.g. "\u23bf  "); NULL keeps it.
+                                   Setting it also switches the marker on,
+                                   unless FYMD_RF_NO_CODE_MARKER is given */
     enum fymd_table_border table_border; /* override theme table.border; default THEME */
     void *userdata;             /* opaque, propagated to fymd_renderer_get_cfg() */
 };

@@ -146,6 +146,8 @@ one-shot and progressive language rendering.
 | `FYMD_RF_NO_DIFF`      | Render ```` ```diff ```` blocks as ordinary code instead of a GitHub-like diff |
 | `FYMD_RF_NO_DIFF_LINES`| No line-number gutter in diff blocks              |
 | `FYMD_RF_NO_DIFF_HL`   | Do not highlight diff content as the patched file's language |
+| `FYMD_RF_CODE_MARKER`  | Switch the styling's fenced first-row marker on for this render |
+| `FYMD_RF_NO_CODE_MARKER` | ... or off                                      |
 
 `FYMD_RF_DEFAULT` is `FYMD_RF_HEAL`. `fymd_renderer_get_cfg()` returns the
 renderer's owned copy of the cfg; `fymd_detect_width()` resolves the auto width;
@@ -380,7 +382,8 @@ code:                # fenced-code highlighting (libfyts)
     header: default  # empty suppresses; templates substitute arbitrary {key} values
     footer: default
     prefix: "  "     # prefix before every fenced content row
-    marker: ""       # non-empty: prefix of the FIRST row only, rest indented
+    marker: "⎿  "    # prefix of the FIRST row only, the rest indented to it
+    marker_enabled: false  # switched on here, or per render
   diff:              # GitHub-like ```diff / ```patch rendering
     enabled: true
     line_numbers: true      # new-side gutter (blank on removed lines)
@@ -395,10 +398,10 @@ blanket reset keep nested styling intact. The `code:` block configures the
 libfyts highlighter; the language catalogue is the build-time
 `MD4C_FYTS_CATALOGUE` choice.
 
-`code.decoration.marker` (cfg `code_marker`, CLI `--code-marker=STR`) gives a
-fenced block a hanging-indent shape instead of header/footer rules: the marker
-prefixes the **first** content row and the remaining rows are indented to its
-display width. With the rules suppressed (`header: ""`, `footer: ""`):
+`code.decoration.marker` gives a fenced block a hanging-indent shape instead of
+header/footer rules: the marker prefixes the **first** content row and the
+remaining rows are indented to its display width. With the rules suppressed
+(`header: ""`, `footer: ""`):
 
 ```
   ⎿  int main(int argc, char **argv)
@@ -406,6 +409,12 @@ display width. With the rules suppressed (`header: ""`, `footer: ""`):
        return 0;
      }
 ```
+
+The string lives in the styling (or `cfg.code_marker` / `--code-marker=STR`,
+which override it), and it is **off** unless switched on: `marker_enabled: true`
+in the styling, `FYMD_RF_CODE_MARKER` / `--marker=on` per render.
+`FYMD_RF_NO_CODE_MARKER` / `--marker=off` switches a configured marker back off,
+so one styling serves both shapes.
 
 It applies to every fenced path -- plain, highlighted, the diff view and the raw
 `fymd_render_fenced_block()` -- but not to the `code.reverse` bubble, which
