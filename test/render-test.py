@@ -10,8 +10,10 @@
 # Run with --color=off so the output is plain text; the bar glyph is U+2502.
 
 import argparse
+import os
 import subprocess
 import sys
+import tempfile
 
 BAR = "│"
 
@@ -219,6 +221,38 @@ def check_diff(program):
     return ok
 
 
+NO_DECORATION = 'code:\n  decoration:\n    header: ""\n    footer: ""\n'
+
+
+def check_marker(program):
+    """code.decoration.marker / --code-marker: the first row of a fenced block
+    carries the marker, the rest are indented to its display width."""
+    ok = True
+    src = "```c\nint main(void)\n{\n  return 0;\n}\n```\n"
+    expected = ("  \u23bf  int main(void)\n"
+                "     {\n"
+                "       return 0;\n"
+                "     }\n")
+    for extra in (["--code-marker=\u23bf  ", "--style=" + _tmp_style(NO_DECORATION)],
+                  ["--style=" + _tmp_style(NO_DECORATION +
+                                           '    marker: "\u23bf  "\n')]):
+        got = run(program, src, extra)
+        os.unlink(extra[-1].split("=", 1)[1])
+        if got != expected:
+            ok = False
+            print("FAIL code_marker (%s)" % extra[0])
+            print("  expected: %r" % expected)
+            print("  got:      %r" % got)
+    return ok
+
+
+def _tmp_style(text):
+    fd, path = tempfile.mkstemp(suffix=".yaml")
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser(description="ANSI renderer golden-output test")
     ap.add_argument("-p", "--program", required=True, help="path to fymd4c binary")
@@ -236,7 +270,7 @@ def main():
             print("  expected: %r" % expected)
             print("  got:      %r" % got)
 
-    for check in (check_reverse, check_diff):
+    for check in (check_reverse, check_diff, check_marker):
         if check(opts.program):
             passed += 1
         else:
