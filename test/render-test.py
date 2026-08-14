@@ -225,22 +225,38 @@ NO_DECORATION = 'code:\n  decoration:\n    header: ""\n    footer: ""\n'
 
 
 def check_marker(program):
-    """code.decoration.marker / --code-marker: the first row of a fenced block
-    carries the marker, the rest are indented to its display width."""
+    """The fenced first-row marker: the string comes from the styling (or
+    --code-marker), and it is switched on per render (--marker=on /
+    FYMD_RF_CODE_MARKER) or in the styling itself (marker_enabled)."""
     ok = True
     src = "```c\nint main(void)\n{\n  return 0;\n}\n```\n"
-    expected = ("  \u23bf  int main(void)\n"
-                "     {\n"
-                "       return 0;\n"
-                "     }\n")
-    for extra in (["--code-marker=\u23bf  ", "--style=" + _tmp_style(NO_DECORATION)],
-                  ["--style=" + _tmp_style(NO_DECORATION +
-                                           '    marker: "\u23bf  "\n')]):
-        got = run(program, src, extra)
-        os.unlink(extra[-1].split("=", 1)[1])
+    marked = ("  \u23bf  int main(void)\n"
+              "     {\n"
+              "       return 0;\n"
+              "     }\n")
+    plain = ("    int main(void)\n"
+             "    {\n"
+             "      return 0;\n"
+             "    }\n")
+    cases = [
+        # (extra args, styling YAML, expected)
+        (["--marker=on"], NO_DECORATION, marked),
+        (["--code-marker=\u23bf  "], NO_DECORATION, marked),
+        ([], NO_DECORATION + '    marker_enabled: true\n', marked),
+        # The styling carries a marker, but it stays off unless asked for.
+        ([], NO_DECORATION, plain),
+        # ... and an enabled marker can be switched back off per render.
+        (["--marker=off"], NO_DECORATION + '    marker_enabled: true\n', plain),
+    ]
+    for extra, style, expected in cases:
+        path = _tmp_style(style)
+        try:
+            got = run(program, src, extra + ["--style=" + path])
+        finally:
+            os.unlink(path)
         if got != expected:
             ok = False
-            print("FAIL code_marker (%s)" % extra[0])
+            print("FAIL code_marker %r" % (extra,))
             print("  expected: %r" % expected)
             print("  got:      %r" % got)
     return ok
