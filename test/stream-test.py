@@ -24,6 +24,7 @@ FIXTURES = {
     "table": "| Name | Role | Notes |\n|:-----|:----:|------:|\n| Alice | Admin | active |\n| Bob | User | a longer cell value |\n\ndone.\n",
     "table_in_quote": "> | A | B |\n> |---|---|\n> | 1 | 2 |\n\nafter.\n",
     "code": "```js\nconst x = 1;\n\nconst y = 2;\n```\n\nafter code.\n",
+    "diff": "```diff\n--- a/x.c\n+++ b/x.c\n@@ -1,3 +1,3 @@\n int main(void)\n-{ return 1; }\n+{ return 0; }\n```\n\nafter diff.\n",
     "inline": "Some **bold** and *italic* and `code` and ~~del~~ text here.\n",
     "cjk_emoji": "| Lang | Word |\n|------|------|\n| cjk | 日本語 |\n| emoji | \U0001f680\U0001f525 |\n\nend.\n",
     "nested": "1. outer\n   - inner a\n   - inner b\n\n2. second\n",

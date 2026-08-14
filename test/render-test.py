@@ -110,6 +110,115 @@ def check_reverse(program):
     return ok
 
 
+DIFF_INPUT = ("```diff\n"
+              "--- a/x.txt\n"
+              "+++ b/x.txt\n"
+              "@@ -3,4 +3,4 @@\n"
+              " ctx\n"
+              "-gone\n"
+              "+here\n"
+              "```\n")
+
+
+def check_diff(program):
+    """```diff blocks render GitHub-style: a new-side line-number gutter
+    (blank on removals, numbering resumed from the @@ header) and, with colour
+    on, a background band per added/removed row padded to the right margin."""
+    ok = True
+    plain = run(program, DIFF_INPUT, ["--width=40"]).split("\n")
+    rows = [line for line in plain if "%s " % BAR in line]
+    expected = [
+        "       %s --- a/x.txt" % BAR,
+        "       %s +++ b/x.txt" % BAR,
+        "       %s @@ -3,4 +3,4 @@" % BAR,
+        "      3%s  ctx" % BAR,
+        "       %s -gone" % BAR,
+        "      4%s +here" % BAR,
+    ]
+    if rows != expected:
+        ok = False
+        print("FAIL diff_gutter")
+        print("  expected: %r" % expected)
+        print("  got:      %r" % rows)
+
+    # Gutter off: no numbers, no separator column.
+    nolines = run(program, DIFF_INPUT, ["--width=40", "--diff-lines=off"])
+    if BAR in nolines or "-gone\n" not in nolines:
+        ok = False
+        print("FAIL diff_lines_off")
+        print("  got: %r" % nolines)
+
+    # --diff=off falls back to the plain fenced-code path (no gutter at all).
+    off = run(program, DIFF_INPUT, ["--width=40", "--diff=off"])
+    if BAR in off or "-gone\n" not in off:
+        ok = False
+        print("FAIL diff_off")
+        print("  got: %r" % off)
+
+    # A "git show" preamble carries no marker column: its first character must
+    # survive ("commit", not "ommit"), and it gets no line number.
+    show = ("```diff\n"
+            "commit deadbeef\n"
+            "Author: A U Thor <a@example.com>\n"
+            "\n"
+            "    subject line\n"
+            "\n"
+            "--- a/x.txt\n"
+            "+++ b/x.txt\n"
+            "@@ -3,2 +3,2 @@\n"
+            "-gone\n"
+            "+here\n"
+            "```\n")
+    rows = [ln for ln in run(program, show, ["--width=44"]).split("\n")
+            if "%s " % BAR in ln]
+    expected = [
+        "       %s commit deadbeef" % BAR,
+        "       %s Author: A U Thor <a@example.com>" % BAR,
+        "       %s " % BAR,
+        "       %s     subject line" % BAR,
+        "       %s " % BAR,
+        "       %s --- a/x.txt" % BAR,
+        "       %s +++ b/x.txt" % BAR,
+        "       %s @@ -3,2 +3,2 @@" % BAR,
+        "       %s -gone" % BAR,
+        "      3%s +here" % BAR,
+    ]
+    if rows != expected:
+        ok = False
+        print("FAIL diff_preamble")
+        print("  expected: %r" % expected)
+        print("  got:      %r" % rows)
+
+    # An informal snippet with no headers at all still marks up its rows.
+    bare = run(program, "```diff\n-old\n+new\n ctx\n```\n", ["--width=40"])
+    if ["       %s -old" % BAR, "       %s +new" % BAR, "       %s  ctx" % BAR] != \
+            [ln for ln in bare.split("\n") if "%s " % BAR in ln]:
+        ok = False
+        print("FAIL diff_headerless: %r" % bare)
+
+    # Coloured bands: the added/removed rows carry a background that is reset
+    # only at end of row, and the row is padded out to the margin.
+    out = subprocess.run([program, "-t", "ansi", "--color=on",
+                          "--background=dark", "--width=40"],
+                         input=DIFF_INPUT.encode("utf-8"),
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if out.returncode != 0:
+        raise RuntimeError("fymd4c --color=on failed")
+    coloured = out.stdout.decode("utf-8").split("\n")
+    add = [ln for ln in coloured if "+here" in ln]
+    rem = [ln for ln in coloured if "-gone" in ln]
+    if (len(add) != 1 or len(rem) != 1 or
+            "\x1b[48;2;18;56;32m+here" not in add[0] or
+            "\x1b[48;2;74;24;26m-gone" not in rem[0] or
+            not add[0].endswith("\x1b[49m") or
+            not rem[0].endswith("\x1b[49m")):
+        ok = False
+        print("FAIL diff_bands")
+        print("  add: %r" % add)
+        print("  rem: %r" % rem)
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser(description="ANSI renderer golden-output test")
     ap.add_argument("-p", "--program", required=True, help="path to fymd4c binary")
@@ -127,10 +236,11 @@ def main():
             print("  expected: %r" % expected)
             print("  got:      %r" % got)
 
-    if check_reverse(opts.program):
-        passed += 1
-    else:
-        failed += 1
+    for check in (check_reverse, check_diff):
+        if check(opts.program):
+            passed += 1
+        else:
+            failed += 1
 
     print("%d passed, %d failed" % (passed, failed))
     sys.exit(1 if failed else 0)

@@ -122,6 +122,27 @@ def main():
         if style_path is not None:
             os.unlink(style_path)
 
+    # A raw .diff/.patch file rendered with --language=diff goes through the
+    # same GitHub-like diff view as a ```diff fence: new-side line numbers from
+    # the @@ header, content highlighted as the patched file's language.
+    patch = (b"--- a/x.c\n+++ b/x.c\n@@ -7,3 +7,3 @@\n"
+             b" int main(void)\n-{ return 1; }\n+{ return 0; }\n")
+    diff = run(options.program, ["--language=diff"], data=patch)
+    rows = [ln for ln in diff.stdout.split(b"\n") if "│".encode() in ln]
+    expected = [
+        "       │ --- a/x.c".encode(),
+        "       │ +++ b/x.c".encode(),
+        "       │ @@ -7,3 +7,3 @@".encode(),
+        "      7│  int main(void)".encode(),
+        "       │ -{ return 1; }".encode(),
+        "      8│ +{ return 0; }".encode(),
+    ]
+    if diff.returncode == 0 and rows == expected:
+        passed += 1
+    else:
+        failed += 1
+        print("FAIL --language=diff: %r" % rows)
+
     invalid = run(options.program, ["--format=html", "--language=text"])
     if invalid.returncode != 0:
         passed += 1
