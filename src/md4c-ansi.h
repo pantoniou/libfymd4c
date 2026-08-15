@@ -132,6 +132,16 @@ extern "C"
                           void *userdata, unsigned parser_flags, unsigned renderer_flags,
                           int width, const struct MD_ANSI_STYLE *style,
                           MD_ANSI_MARGIN_FN margin_fn, void *margin_userdata);
+    /* As md_ansi_ex_styled_margins(), but with a retained libfyts context.
+     * A caller that renders repeatedly must pass one, so that the compiled
+     * highlight query survives instead of being rebuilt for every fenced
+     * block of every render. */
+    int md_ansi_ex_styled_margins_ctx(const MD_CHAR *input, MD_SIZE input_size,
+                          void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
+                          void *userdata, unsigned parser_flags, unsigned renderer_flags,
+                          int width, const struct MD_ANSI_STYLE *style,
+                          MD_ANSI_MARGIN_FN margin_fn, void *margin_userdata,
+                          struct fyts_ctx **fyts_ctx);
 
     /* Render raw text through the fenced-code pipeline without Markdown
      * parsing. STYLE enables the existing rules/margin/plain-code styling;

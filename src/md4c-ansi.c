@@ -3182,7 +3182,7 @@ md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
                                  parser_flags, renderer_flags, width, style, NULL);
 }
 
-static int
+int
 md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
                   void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
                   void* userdata, unsigned parser_flags, unsigned renderer_flags,

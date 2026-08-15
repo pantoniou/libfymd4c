@@ -682,9 +682,15 @@ fymd_render_(struct fymd_renderer *r, const char *md, size_t len,
         return -1;
 
     memset(&b, 0, sizeof(b));
-    rc = md_ansi_ex_styled_margins(md, (MD_SIZE) len, fymd_buf_append, &b,
+    rc = md_ansi_ex_styled_margins_ctx(md, (MD_SIZE) len, fymd_buf_append, &b,
                            r->parser_flags, r->renderer_flags, r->width, r->style,
-                           margin_fn, margin_userdata);
+                           margin_fn, margin_userdata,
+#ifdef MD4C_WITH_FYTS
+                           &r->fyts_ctx
+#else
+                           NULL
+#endif
+                           );
     if(rc != 0 || b.oom) {
         free(b.data);
         return -1;
