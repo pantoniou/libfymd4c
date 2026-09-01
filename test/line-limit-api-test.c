@@ -30,6 +30,7 @@ main(void)
     struct fymd_update upd;
     char *out = NULL;
     size_t out_len = 0;
+    size_t measured = 0;
     int failed = 0;
 
     if(r == NULL)
@@ -42,6 +43,11 @@ main(void)
        rows(out, out_len) != 2)
         failed = 1;
     fymd_free(out);
+
+    if(fymd_measure_rows(r, "a\n\nb\n\nc\n", 8, &measured) != 0 ||
+       measured != 2 ||
+       fymd_measure_rows(r, "a", 1, NULL) == 0)
+        failed = 1;
 
     memset(&chrome_cfg, 0, sizeof(chrome_cfg));
     chrome_cfg.width = 12;

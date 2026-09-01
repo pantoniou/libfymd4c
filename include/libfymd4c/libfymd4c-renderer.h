@@ -257,6 +257,11 @@ int fymd_render_with_margins(struct fymd_renderer *r,
         const char *md, size_t len, fymd_margin_fn margin_fn,
         void *margin_userdata, char **out, size_t *out_len) FYMD_EXPORT;
 
+/* Measure the terminal rows produced by a one-shot render. This uses the
+ * renderer's Markdown layout, width, styling, and rendered-row limit. */
+int fymd_measure_rows(struct fymd_renderer *r, const char *md, size_t len,
+                      size_t *rows) FYMD_EXPORT;
+
 /* Convenience wrapper around fymd_render(): returns a heap-allocated,
  * NUL-terminated string (free with fymd_free()), or NULL on error. */
 char *fymd_render_to_string(struct fymd_renderer *r, const char *md, size_t len) FYMD_EXPORT;

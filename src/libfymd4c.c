@@ -735,6 +735,22 @@ fymd_render_with_margins(struct fymd_renderer *r,
     return fymd_render_(r, md, len, margin_fn, margin_userdata, out, out_len);
 }
 
+int
+fymd_measure_rows(struct fymd_renderer *r, const char *md, size_t len,
+                  size_t *rows)
+{
+    char *out;
+    size_t out_len;
+
+    if(rows == NULL)
+        return -1;
+    if(fymd_render(r, md, len, &out, &out_len) != 0)
+        return -1;
+    *rows = fymd_count_rows(out, out_len);
+    free(out);
+    return 0;
+}
+
 char *
 fymd_render_to_string(struct fymd_renderer *r, const char *md, size_t len)
 {
