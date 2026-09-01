@@ -686,11 +686,11 @@ fymd_render_(struct fymd_renderer *r, const char *md, size_t len,
                            r->parser_flags, r->renderer_flags, r->width, r->style,
                            margin_fn, margin_userdata,
 #ifdef MD4C_WITH_FYTS
-                           &r->fyts_ctx
+                           &r->fyts_ctx,
 #else
-                           NULL
+                           NULL,
 #endif
-                           );
+                           NULL);
     if(rc != 0 || b.oom) {
         free(b.data);
         return -1;
@@ -735,20 +735,56 @@ fymd_render_with_margins(struct fymd_renderer *r,
     return fymd_render_(r, md, len, margin_fn, margin_userdata, out, out_len);
 }
 
+static int
+fymd_measure_rows_(struct fymd_renderer *r, const char *md, size_t len,
+                   fymd_margin_fn margin_fn, void *margin_userdata,
+                   size_t *rows)
+{
+    if(r == NULL || rows == NULL)
+        return -1;
+
+    /* A viewport clamps the render, so the row count is no longer a property
+     * of the document alone; measure it off the real output in that case. */
+    if(r->limit.mode != FYMD_LLM_NONE && r->limit.max_lines > 0) {
+        char *out;
+        size_t out_len;
+
+        if(fymd_render_(r, md, len, margin_fn, margin_userdata,
+                        &out, &out_len) != 0)
+            return -1;
+        *rows = fymd_count_rows(out, out_len);
+        free(out);
+        return 0;
+    }
+
+    /* Otherwise render with no sink: the renderer counts the rows it would
+     * have emitted, without building the output buffer. */
+    if(md_ansi_ex_styled_margins_ctx(md, (MD_SIZE) len, NULL, NULL,
+                       r->parser_flags, r->renderer_flags, r->width, r->style,
+                       margin_fn, margin_userdata,
+#ifdef MD4C_WITH_FYTS
+                       &r->fyts_ctx,
+#else
+                       NULL,
+#endif
+                       rows) != 0)
+        return -1;
+    return 0;
+}
+
 int
 fymd_measure_rows(struct fymd_renderer *r, const char *md, size_t len,
                   size_t *rows)
 {
-    char *out;
-    size_t out_len;
+    return fymd_measure_rows_(r, md, len, NULL, NULL, rows);
+}
 
-    if(rows == NULL)
-        return -1;
-    if(fymd_render(r, md, len, &out, &out_len) != 0)
-        return -1;
-    *rows = fymd_count_rows(out, out_len);
-    free(out);
-    return 0;
+int
+fymd_measure_rows_with_margins(struct fymd_renderer *r, const char *md,
+        size_t len, fymd_margin_fn margin_fn, void *margin_userdata,
+        size_t *rows)
+{
+    return fymd_measure_rows_(r, md, len, margin_fn, margin_userdata, rows);
 }
 
 char *

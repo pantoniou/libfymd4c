@@ -73,7 +73,8 @@ struct MD_HTML_tag {
 static inline void
 render_verbatim(MD_HTML* r, const MD_CHAR* text, MD_SIZE size)
 {
-    r->process_output(text, size, r->userdata);
+    if (r->process_output)
+        r->process_output(text, size, r->userdata);
 }
 
 /* Keep this as a macro. Most compiler should then be smart enough to replace

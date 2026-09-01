@@ -386,7 +386,7 @@ stream_render(MD4C_STREAM* s, STREAM_BUF* buf, const char* input,
     sbuf_reset(buf);
     ret = md_ansi_ex_styled_ctx(rin, (unsigned) rlen, sbuf_sink, buf,
                                 s->parser_flags, flags, s->width, s->style,
-                                s->fyts_ctx);
+                                s->fyts_ctx, NULL);
     free(tmp);
     if(ret != 0 || buf->error)
         return -1;

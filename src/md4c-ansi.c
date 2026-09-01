@@ -150,7 +150,8 @@ struct MD_ANSI_tag {
     int line_dirty;         /* content emitted on the current line, no newline yet */
     MD_ANSI_MARGIN_FN margin_fn;
     void* margin_userdata;
-    size_t output_row;
+    size_t output_row;      /* newlines emitted so far == index of current row */
+    int row_open;           /* bytes emitted on the current (unterminated) row */
 
     /* Stack of open lists (UL/OL), one entry per nesting level, so a nested
      * list's marker type and counter don't leak from its parent. */
@@ -348,6 +349,21 @@ card_feed(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 static void
 out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
+    MD_SIZE i;
+
+    /* Every byte of the rendered document funnels through here (prose, code
+     * blocks, tables, cards), so this is the one place row counting is exact.
+     * It runs even without a sink, so measuring can render into /dev/null. */
+    for(i = 0; i < size; i++) {
+        if(text[i] == '\n')
+            r->output_row++;
+    }
+    if(size > 0)
+        r->row_open = (text[size - 1] != '\n');
+
+    if (!r->process_output)
+        return;
+
     if(r->card && r->process_output == r->real_output)
         card_feed(r, text, size);
     else
@@ -526,7 +542,6 @@ flush_wrapped(MD_ANSI* r)
             if(alen > 0)
                 out_direct(r, "\x1b[0m", 4);        /* close before the newline */
             out_direct(r, "\n", 1);
-            r->output_row++;
             render_indent(r);
             if(alen > 0)
                 out_direct(r, active, alen);        /* re-apply the open style */
@@ -535,7 +550,6 @@ flush_wrapped(MD_ANSI* r)
             out_direct(r, r->lbuf + lines[k].start, lines[k].len);
     }
     out_direct(r, "\n", 1);
-    r->output_row++;
 
     free(lines);
     r->lsize = 0;
@@ -549,7 +563,6 @@ render_newline(MD_ANSI* r)
         flush_wrapped(r);
     else {
         out_direct(r, "\n", 1);
-        r->output_row++;
     }
 }
 
@@ -3169,17 +3182,17 @@ md_ansi_ex(const MD_CHAR* input, MD_SIZE input_size,
            int width)
 {
     return md_ansi_ex_styled(input, input_size, process_output, userdata,
-                             parser_flags, renderer_flags, width, NULL);
+                             parser_flags, renderer_flags, width, NULL, NULL);
 }
 
 int
 md_ansi_ex_styled(const MD_CHAR* input, MD_SIZE input_size,
                   void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
                   void* userdata, unsigned parser_flags, unsigned renderer_flags,
-                  int width, const struct MD_ANSI_STYLE* style)
+                  int width, const struct MD_ANSI_STYLE* style, size_t *output_rows)
 {
     return md_ansi_ex_styled_ctx(input, input_size, process_output, userdata,
-                                 parser_flags, renderer_flags, width, style, NULL);
+                                 parser_flags, renderer_flags, width, style, NULL, output_rows);
 }
 
 int
@@ -3188,7 +3201,8 @@ md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
                   void* userdata, unsigned parser_flags, unsigned renderer_flags,
                   int width, const struct MD_ANSI_STYLE* style,
                   MD_ANSI_MARGIN_FN margin_fn, void* margin_userdata,
-                  struct fyts_ctx** fyts_ctx)
+                  struct fyts_ctx** fyts_ctx,
+		  size_t *output_rows)
 {
     MD_ANSI render;
     MD_PARSER parser;
@@ -3205,7 +3219,8 @@ md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
         ret = md_ansi_ex_styled_margins_ctx(hbuf.data, hbuf.size,
                                 process_output, userdata,
                                 parser_flags, renderer_flags & ~MD_ANSI_FLAG_HEAL,
-                                width, style, margin_fn, margin_userdata, fyts_ctx);
+                                width, style, margin_fn, margin_userdata, fyts_ctx,
+				output_rows);
         free(hbuf.data);
         return ret;
     }
@@ -3272,6 +3287,11 @@ md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
         /* Emit any trailing card line the output did not terminate with '\n'. */
         if(render.card && render.card_size > 0)
             flush_card_line(&render);
+
+        /* Count only now: the trailing flushes above may add a final row. */
+        if(output_rows != NULL && ret >= 0)
+            *output_rows = render.output_row + (render.row_open ? 1 : 0);
+
         free(render.lbuf);
         free(render.code_buf);
         free(render.sgr_buf);
@@ -3292,11 +3312,11 @@ md_ansi_ex_styled_ctx(const MD_CHAR* input, MD_SIZE input_size,
                   void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
                   void* userdata, unsigned parser_flags, unsigned renderer_flags,
                   int width, const struct MD_ANSI_STYLE* style,
-                  struct fyts_ctx** fyts_ctx)
+                  struct fyts_ctx** fyts_ctx, size_t *output_rows)
 {
     return md_ansi_ex_styled_margins_ctx(input, input_size, process_output,
             userdata, parser_flags, renderer_flags, width, style, NULL, NULL,
-            fyts_ctx);
+            fyts_ctx, output_rows);
 }
 
 int
@@ -3304,11 +3324,12 @@ md_ansi_ex_styled_margins(const MD_CHAR* input, MD_SIZE input_size,
                   void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
                   void* userdata, unsigned parser_flags, unsigned renderer_flags,
                   int width, const struct MD_ANSI_STYLE* style,
-                  MD_ANSI_MARGIN_FN margin_fn, void* margin_userdata)
+                  MD_ANSI_MARGIN_FN margin_fn, void* margin_userdata,
+		  size_t *output_rows)
 {
     return md_ansi_ex_styled_margins_ctx(input, input_size, process_output,
             userdata, parser_flags, renderer_flags, width, style, margin_fn,
-            margin_userdata, NULL);
+            margin_userdata, NULL, output_rows);
 }
 
 /* Emit raw code one physical line at a time. Styled blocks use the same

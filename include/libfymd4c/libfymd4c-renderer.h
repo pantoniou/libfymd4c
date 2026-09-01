@@ -262,6 +262,14 @@ int fymd_render_with_margins(struct fymd_renderer *r,
 int fymd_measure_rows(struct fymd_renderer *r, const char *md, size_t len,
                       size_t *rows) FYMD_EXPORT;
 
+/* Measure the rows a fymd_render_with_margins() render would produce. A margin
+ * changes the indent width, hence prose wrapping, hence the row count, so
+ * measure with the same callback the render will use. A NULL callback is
+ * exactly equivalent to fymd_measure_rows(). */
+int fymd_measure_rows_with_margins(struct fymd_renderer *r,
+        const char *md, size_t len, fymd_margin_fn margin_fn,
+        void *margin_userdata, size_t *rows) FYMD_EXPORT;
+
 /* Convenience wrapper around fymd_render(): returns a heap-allocated,
  * NUL-terminated string (free with fymd_free()), or NULL on error. */
 char *fymd_render_to_string(struct fymd_renderer *r, const char *md, size_t len) FYMD_EXPORT;

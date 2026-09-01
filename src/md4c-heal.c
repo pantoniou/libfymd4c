@@ -1310,7 +1310,7 @@ int md_heal(const char* input, unsigned input_size,
     }
 
     /* Output result */
-    if(buf.size > 0)
+    if(process_output && buf.size > 0)
         process_output(buf.data, buf.size, userdata);
 
     buf_free(&buf);
