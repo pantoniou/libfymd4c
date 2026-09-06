@@ -35,6 +35,7 @@ extern "C" {
 #include <libfymd4c/libfymd4c-renderer.h>
 #include <libfymd4c/libfymd4c-convert.h>
 #include <libfymd4c/libfymd4c-inline.h>
+#include <libfymd4c/libfymd4c-width.h>
 
 #ifdef __cplusplus
 }

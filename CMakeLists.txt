@@ -208,6 +208,10 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(inline-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME inline-api COMMAND inline-api-test)
 
+        add_executable(width-api-test test/width-api-test.c)
+        target_link_libraries(width-api-test PRIVATE libfymd4c::libfymd4c)
+        add_test(NAME width-api COMMAND width-api-test)
+
         add_executable(fenced-api-test test/fenced-api-test.c)
         target_link_libraries(fenced-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME fenced-api COMMAND fenced-api-test)
