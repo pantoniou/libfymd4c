@@ -140,6 +140,14 @@ runs out. It exists so a consumer that draws text itself can know which part is
 bold without linking md4c and without a second hand-rolled parser; md4c stays
 absorbed and hidden here, as everything else does.
 
+The **width measurement** (`src/md4c-width.c`, `libfymd4c-width.h`) exposes
+`fymd_cp_width()`, `fymd_str_width()` and `fymd_utf8_decode()`. The ANSI
+renderer needs it to lay text out and a consumer that draws its own cells needs
+the same answer, so the generated Unicode tables live in one translation unit
+behind the public names rather than being copied. Do not add a second width
+table anywhere; regenerate these with `scripts/gen-wcwidth.py` after a Unicode
+bump, which is a behaviour change and gets its own commit.
+
 ## Conventions
 
 - C90-clean (`-Wdeclaration-after-statement` is enforced); declarations at block

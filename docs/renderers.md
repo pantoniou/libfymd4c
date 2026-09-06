@@ -483,3 +483,26 @@ Formatting inside complete code spans / fenced blocks and math is not healed.
 
 The shared header `md4c-heal-wrap.h` provides the heal-before-render path used by
 `MD_ANSI_FLAG_HEAL` (heal the input, then render).
+
+## Display width (`libfymd4c-width.h`)
+
+The columns a text occupies in a terminal, from Unicode 15.0.0 tables generated
+by `scripts/gen-wcwidth.py`.
+
+```c
+int    fymd_cp_width(unsigned int cp);
+size_t fymd_str_width(const char *s, size_t len);   /* FYMD_NT to the NUL */
+size_t fymd_utf8_decode(const char *s, size_t len, unsigned int *cp);
+```
+
+`fymd_cp_width()` answers 0 for a combining mark, a zero width format character
+and a control, 2 for East Asian Wide and Fullwidth and for the emoji that
+present wide, and 1 otherwise. A malformed byte measures as one column and
+`fymd_utf8_decode()` always advances, so a caller cannot loop on bad input.
+
+This is a per-codepoint measure: it does not segment grapheme clusters, so a
+ZWJ emoji sequence measures as the sum of its parts and is wider than a
+terminal that composes it will draw.
+
+The ANSI renderer uses these for its own layout, so a consumer that draws cells
+itself measures text exactly as the renderer does.
