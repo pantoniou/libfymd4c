@@ -205,6 +205,35 @@ char *fymd_heal_to_string(md, len);
 
 These back the `fymd4c -t html` and `-t heal` CLI formats.
 
+## Inline reader (`libfymd4c-inline.h`)
+
+`fymd_inline_parse()` reads a short text as CommonMark and reports its inline
+content as a sequence of runs, each carrying the attributes that apply to it:
+
+```c
+struct fymd_inline *inl = fymd_inline_parse(label, FYMD_NT,
+                                            FYMD_IF_STRIKETHROUGH);
+size_t i;
+
+for (i = 0; i < fymd_inline_count(inl); i++) {
+        const struct fymd_inline_run *run = fymd_inline_get(inl, i);
+
+        /* run->text, run->attrs (FYMD_IA_STRONG, ...), run->href */
+}
+fymd_inline_destroy(inl);
+```
+
+This is the piece a caller wants when it draws the text itself — a label in a
+diagram, a cell in a table — and needs to know which part of it is bold,
+rather than a rendered document. `libfymermaid` uses it for mermaid's markdown
+strings.
+
+Block structure is consumed and not reported: a heading or a list marker is
+dropped and its content reported as runs, and an indented line is not taken
+for a code block. A soft line break becomes a space; a hard one is a run
+carrying `FYMD_IA_BREAK`. `fymd_inline_plain()` joins the runs, which is the
+text with its markup removed.
+
 ## ANSI Renderer (`md4c-ansi.h`)
 
 Renders Markdown into ANSI terminal output with escape codes for styling.

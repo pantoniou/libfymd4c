@@ -47,6 +47,11 @@ extern "C" {
 #define FYMD_BIT(x) (1U << (x))
 #endif
 
+/* FYMD_NT - pass as a length to mean "the text is NUL terminated". */
+#ifndef FYMD_NT
+#define FYMD_NT ((size_t)-1)
+#endif
+
 /* Library version string, e.g. "0.5.3". */
 const char *fymd_library_version(void) FYMD_EXPORT;
 

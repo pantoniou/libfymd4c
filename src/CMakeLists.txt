@@ -105,6 +105,7 @@ set(_fymd4c_sources
     md4c-ansi.c md4c-ansi.h
     md4c-style.c md4c-style.h
     md4c-stream.c md4c-stream.h
+    md4c-inline.c
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES GNU|Clang)
@@ -220,6 +221,7 @@ install(FILES
     "${_fymd4c_incdir}/libfymd4c/libfymd4c-util.h"
     "${_fymd4c_incdir}/libfymd4c/libfymd4c-renderer.h"
     "${_fymd4c_incdir}/libfymd4c/libfymd4c-convert.h"
+    "${_fymd4c_incdir}/libfymd4c/libfymd4c-inline.h"
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/libfymd4c)
 # md4c.h is installed as a companion: the public API documents cfg.parser_flags
 # as md4c MD_FLAG_* and HTML parser_flags likewise, so consumers need the flag

@@ -134,6 +134,12 @@ its own `conformance/<file>/<n>` ctest (driven through `fymd4c -t html` via
 (libfyaml's per-subtest registration pattern). The example count is discovered at
 configure time from the spec markers; `ctest -L conformance` selects just these.
 
+The **inline reader** (`src/md4c-inline.c`, `libfymd4c-inline.h`) exposes
+md4c's inline parsing as `fymd_inline_*`: a text in, a sequence of attributed
+runs out. It exists so a consumer that draws text itself can know which part is
+bold without linking md4c and without a second hand-rolled parser; md4c stays
+absorbed and hidden here, as everything else does.
+
 ## Conventions
 
 - C90-clean (`-Wdeclaration-after-statement` is enforced); declarations at block

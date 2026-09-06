@@ -34,6 +34,7 @@ extern "C" {
 #include <libfymd4c/libfymd4c-util.h>
 #include <libfymd4c/libfymd4c-renderer.h>
 #include <libfymd4c/libfymd4c-convert.h>
+#include <libfymd4c/libfymd4c-inline.h>
 
 #ifdef __cplusplus
 }
