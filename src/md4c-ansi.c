@@ -1906,7 +1906,8 @@ emit_highlighted_code(MD_ANSI* r, int styled)
         cfg.epilog = footer;
     }
 
-    if(marker_mode || r->fyts_ctx != NULL) {
+    /* A palette is given to a context, so a palette render needs one. */
+    if(marker_mode || r->fyts_ctx != NULL || r->style->palette != NULL) {
         char* output = NULL;
         size_t output_len = 0;
         struct fyts_ctx* own = NULL;
@@ -1920,6 +1921,11 @@ emit_highlighted_code(MD_ANSI* r, int styled)
         }
         if(*ctxp == NULL)
             *ctxp = fyts_ctx_create(&cfg);
+#ifdef MD4C_FYTS_PALETTE
+        /* A highlighter that cannot take the palette keeps its styling. */
+        if(*ctxp != NULL)
+            (void) fyts_ctx_set_palette(*ctxp, r->style->palette);
+#endif
         if(*ctxp == NULL ||
            fyts_ctx_highlight_source(*ctxp, r->code_buf, r->code_size,
                                      &output, &output_len) != 0) {
@@ -2220,6 +2226,10 @@ diff_highlight_segment(MD_ANSI* r, DIFF_LINE* lines, MD_SIZE from, MD_SIZE to,
         }
         if(*r->fyts_ctx == NULL)
             *r->fyts_ctx = fyts_ctx_create(&cfg);
+#ifdef MD4C_FYTS_PALETTE
+        if(*r->fyts_ctx != NULL)
+            (void) fyts_ctx_set_palette(*r->fyts_ctx, r->style->palette);
+#endif
         if(*r->fyts_ctx == NULL ||
            fyts_ctx_highlight_source(*r->fyts_ctx, payload, payload_size,
                                      &hl, &hl_size) != 0) {
@@ -2229,6 +2239,9 @@ diff_highlight_segment(MD_ANSI* r, DIFF_LINE* lines, MD_SIZE from, MD_SIZE to,
     } else {
         struct fyts_ctx* ctx = fyts_ctx_create(&cfg);
         if(ctx != NULL) {
+#ifdef MD4C_FYTS_PALETTE
+            (void) fyts_ctx_set_palette(ctx, r->style->palette);
+#endif
             if(fyts_ctx_highlight_source(ctx, payload, payload_size,
                                          &hl, &hl_size) != 0) {
                 free(hl);

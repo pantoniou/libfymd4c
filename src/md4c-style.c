@@ -6,6 +6,7 @@
  */
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,10 @@
 #include <libfyaml/libfyaml-generic.h>
 
 #include "md4c-style.h"
+
+#ifdef MD4C_WITH_FYPALETTE
+#include <libfypalette.h>
+#endif
 
 struct md4c_embedded_theme {
     const char* name;
@@ -396,11 +401,123 @@ md_ansi_style_create_from_file(const char* path, const MD_ANSI_STYLE_OPTS* opts)
     return s;
 }
 
+/* ---- palette overlay ---- */
+
+/* The palette role of each element pair. A role query answers with the
+ * nearest defined ancestor. An exact entry takes only the role itself: the
+ * ancestor of a row or a card styles another extent than the pair does. */
+static const struct {
+    size_t offset;
+    const char* role;
+    int exact;
+} palette_pairs[] = {
+    { offsetof(MD_ANSI_STYLE, heading),           "md.heading",          0 },
+    { offsetof(MD_ANSI_STYLE, strong),            "md.strong",           0 },
+    { offsetof(MD_ANSI_STYLE, emphasis),          "md.emphasis",         0 },
+    { offsetof(MD_ANSI_STYLE, underline),         "md.underline",        0 },
+    { offsetof(MD_ANSI_STYLE, strikethrough),     "md.strike",           0 },
+    { offsetof(MD_ANSI_STYLE, code),              "md.code",             0 },
+    { offsetof(MD_ANSI_STYLE, math),              "md.math",             0 },
+    { offsetof(MD_ANSI_STYLE, link),              "md.link",             0 },
+    { offsetof(MD_ANSI_STYLE, link_url),          "md.link.url",         0 },
+    { offsetof(MD_ANSI_STYLE, wikilink),          "md.link.wiki",        0 },
+    { offsetof(MD_ANSI_STYLE, blockquote),        "md.quote.bar",        0 },
+    { offsetof(MD_ANSI_STYLE, code_block),        "code.plain",          0 },
+    { offsetof(MD_ANSI_STYLE, rule),              "md.rule",             0 },
+    { offsetof(MD_ANSI_STYLE, table_header),      "md.table.header",     0 },
+    { offsetof(MD_ANSI_STYLE, table_header_row),  "md.table.header.row", 1 },
+    { offsetof(MD_ANSI_STYLE, table_row_odd),     "md.table.row.odd",    1 },
+    { offsetof(MD_ANSI_STYLE, table_row_even),    "md.table.row.even",   1 },
+    { offsetof(MD_ANSI_STYLE, diff_added),        "diff.add",            1 },
+    { offsetof(MD_ANSI_STYLE, diff_removed),      "diff.del",            1 },
+    { offsetof(MD_ANSI_STYLE, diff_context),      "diff.context",        1 },
+    { offsetof(MD_ANSI_STYLE, diff_hunk),         "diff.hunk",           1 },
+    { offsetof(MD_ANSI_STYLE, diff_file),         "diff.file",           1 },
+    { offsetof(MD_ANSI_STYLE, diff_gutter),       "diff.lineno",         1 },
+    { offsetof(MD_ANSI_STYLE, list_marker),       "md.bullet",           0 },
+    { offsetof(MD_ANSI_STYLE, task_done),         "md.task.done",        0 },
+    { offsetof(MD_ANSI_STYLE, reverse),           "md.card",             1 },
+    { offsetof(MD_ANSI_STYLE, indicator_pending), "tool.pending",        0 },
+    { offsetof(MD_ANSI_STYLE, indicator_success), "tool.ok",             0 },
+    { offsetof(MD_ANSI_STYLE, indicator_failure), "tool.fail",           0 },
+};
+
+#define PALETTE_PAIR_COUNT (sizeof(palette_pairs) / sizeof(palette_pairs[0]))
+
+/* The theme pairs the overlay replaced, and the strings it owns. */
+typedef struct {
+    MD_STYLE_PAIR saved[PALETTE_PAIR_COUNT];
+    STRREG reg;
+} PALETTE_OVERLAY;
+
+static MD_STYLE_PAIR*
+palette_pair(MD_ANSI_STYLE* s, size_t i)
+{
+    return (MD_STYLE_PAIR*) ((char*) s + palette_pairs[i].offset);
+}
+
+static void
+palette_overlay_remove(MD_ANSI_STYLE* s)
+{
+    PALETTE_OVERLAY* ov = (PALETTE_OVERLAY*) s->_palette;
+    size_t i;
+
+    if(ov == NULL)
+        return;
+    for(i = 0; i < PALETTE_PAIR_COUNT; i++)
+        *palette_pair(s, i) = ov->saved[i];
+    reg_free(&ov->reg);
+    free(ov);
+    s->_palette = NULL;
+    s->palette = NULL;
+}
+
+int
+md_ansi_style_set_palette(MD_ANSI_STYLE* s, struct fypal_ctx* palette)
+{
+#ifdef MD4C_WITH_FYPALETTE
+    const struct fypal_role* role;
+    PALETTE_OVERLAY* ov;
+    MD_STYLE_PAIR* pair;
+    size_t i;
+
+    if(s == NULL)
+        return -1;
+    palette_overlay_remove(s);
+    if(palette == NULL)
+        return 0;
+    ov = (PALETTE_OVERLAY*) calloc(1, sizeof(*ov));
+    if(ov == NULL)
+        return -1;
+    for(i = 0; i < PALETTE_PAIR_COUNT; i++) {
+        pair = palette_pair(s, i);
+        ov->saved[i] = *pair;
+        role = fypal_ctx_role(palette, palette_pairs[i].role);
+        if(role == NULL)
+            continue;
+        if(palette_pairs[i].exact &&
+           strcmp(fypal_role_name(role), palette_pairs[i].role) != 0)
+            continue;
+        pair->on = reg_dup(&ov->reg, fypal_role_on(palette, role));
+        pair->off = reg_dup(&ov->reg, fypal_role_off(palette, role));
+    }
+    s->_palette = ov;
+    s->palette = palette;
+    return 0;
+#else
+    if(s == NULL)
+        return -1;
+    palette_overlay_remove(s);
+    return palette == NULL ? 0 : -1;
+#endif
+}
+
 void
 md_ansi_style_destroy(MD_ANSI_STYLE* s)
 {
     if(s == NULL)
         return;
+    palette_overlay_remove(s);
     if(s->_owned != NULL) {
         reg_free((STRREG*) s->_owned);
         free(s->_owned);

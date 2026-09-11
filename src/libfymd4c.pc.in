@@ -6,6 +6,6 @@ Name: libfymd4c
 Description: Progressive, healing, syntax-aware Markdown to ANSI terminal renderer.
 Version: @PROJECT_VERSION@
 URL: @PROJECT_HOMEPAGE_URL@
-Requires: libfyaml
+Requires: libfyaml@FYMD4C_PC_REQUIRES_FYPALETTE@
 Libs: -L${libdir} -lfymd4c
 Cflags: -I${includedir}

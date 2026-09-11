@@ -68,6 +68,11 @@ file(APPEND "${_md4c_style_inc}"
 #                   libfyts when enabled) through the CMake package's
 #                   find_dependency() -- consumers link those too.
 set(_fymd4c_incdir "${CMAKE_CURRENT_SOURCE_DIR}/../include")
+if(MD4C_WITH_FYPALETTE)
+    set(FYMD4C_PC_REQUIRES_FYPALETTE ", libfypalette")
+else()
+    set(FYMD4C_PC_REQUIRES_FYPALETTE "")
+endif()
 configure_file(libfymd4c.pc.in libfymd4c.pc @ONLY)
 
 # Prefer libfyaml's imported CMake targets (clean, relocatable interface); fall
@@ -158,6 +163,13 @@ foreach(_t fymd4c fymd4c_static)
     if(MD4C_WITH_FYTS)
         target_compile_definitions(${_t} PRIVATE MD4C_WITH_FYTS)
     endif()
+    if(MD4C_WITH_FYPALETTE)
+        target_compile_definitions(${_t} PRIVATE MD4C_WITH_FYPALETTE)
+        target_link_libraries(${_t} PUBLIC libfypalette::libfypalette)
+    endif()
+    if(MD4C_FYTS_PALETTE)
+        target_compile_definitions(${_t} PRIVATE MD4C_FYTS_PALETTE)
+    endif()
 endforeach()
 
 # libfyaml is a public dependency of both flavours. The static fymd4c archive
@@ -206,6 +218,13 @@ if(MD4C_WITH_FYTS AND _md4c_fyts_from_system)
     set(FYMD4C_STATIC_NEEDS_FYTS 1)
 else()
     set(FYMD4C_STATIC_NEEDS_FYTS 0)
+endif()
+
+# Whether both flavours need find_dependency(libfypalette).
+if(MD4C_WITH_FYPALETTE)
+    set(FYMD4C_NEEDS_FYPALETTE 1)
+else()
+    set(FYMD4C_NEEDS_FYPALETTE 0)
 endif()
 
 

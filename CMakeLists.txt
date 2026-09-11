@@ -8,6 +8,7 @@ project(libfymd4c
 
 option(BUILD_FYMD4C_EXECUTABLE "Whether to compile the fymd4c executable" ON)
 option(MD4C_WITH_FYTS "Tree-sitter syntax highlighting of fenced code via libfyts" ON)
+set(MD4C_FYPALETTE "auto" CACHE STRING "Palette styling through libfypalette: auto, on or off")
 option(ENABLE_ASAN "Enable ASAN support" OFF)
 
 
@@ -166,6 +167,27 @@ if(MD4C_WITH_FYTS)
         set(MD4C_FYTS_TARGET fyts_static)
     endif()
 endif()
+
+# libfypalette is optional. With it, fymd_renderer_set_palette() styles the
+# document through the roles of a palette context. Fenced code takes the
+# palette too when the installed libfyts states that it supports one.
+set_property(CACHE MD4C_FYPALETTE PROPERTY STRINGS auto on off)
+set(MD4C_WITH_FYPALETTE OFF)
+set(MD4C_FYTS_PALETTE OFF)
+if(NOT MD4C_FYPALETTE STREQUAL "off")
+    if(NOT TARGET libfypalette::libfypalette)
+        find_package(libfypalette CONFIG QUIET)
+    endif()
+    if(TARGET libfypalette::libfypalette)
+        set(MD4C_WITH_FYPALETTE ON)
+    elseif(MD4C_FYPALETTE STREQUAL "on")
+        message(FATAL_ERROR "libfypalette not found and MD4C_FYPALETTE is on")
+    endif()
+endif()
+if(MD4C_WITH_FYPALETTE AND MD4C_WITH_FYTS AND libfyts_HAVE_FYPALETTE)
+    set(MD4C_FYTS_PALETTE ON)
+endif()
+message(STATUS "libfymd4c: palette styling ${MD4C_WITH_FYPALETTE}, fenced code ${MD4C_FYTS_PALETTE}")
 
 add_subdirectory(src)
 if (BUILD_FYMD4C_EXECUTABLE)

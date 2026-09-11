@@ -225,6 +225,20 @@ const char *fymd_theme_name(size_t index) FYMD_EXPORT;
  * inline/file style and is rejected after progressive streaming has begun. */
 int fymd_renderer_set_theme(struct fymd_renderer *r, const char *name) FYMD_EXPORT;
 
+struct fypal_ctx;
+
+/* Style the document through the roles of a libfypalette context. Each element
+ * whose role the palette defines (md.heading, md.code, md.link, diff.add, ...)
+ * takes the escapes of the role, and the other elements keep the theme.
+ * Fenced code is highlighted through the code.* roles when libfyts supports a
+ * palette. The palette is borrowed and must outlive its use by the renderer.
+ * The escapes are copied, so call again after the palette changes variant or
+ * capabilities. NULL returns to the theme; fymd_renderer_set_theme() keeps the
+ * palette. Rejected while a progressive stream exists, and when the library is
+ * built without libfypalette. Returns 0 on success, -1 otherwise. */
+int fymd_renderer_set_palette(struct fymd_renderer *r,
+                              struct fypal_ctx *palette) FYMD_EXPORT;
+
 /* The active theme's resolved reverse-card escape pair.
  * Returns 0 on success, -1 if r or its *style is NULL */
 int fymd_renderer_get_reverse_pair(struct fymd_renderer *r,

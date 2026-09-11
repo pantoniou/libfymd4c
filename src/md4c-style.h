@@ -96,6 +96,9 @@ typedef struct MD_ANSI_STYLE {
     int          diff_inner_highlight;/* highlight payloads as the patched file */
     const char*  diff_gutter_sep;     /* glyph between gutter and content */
 
+    struct fypal_ctx* palette;   /* borrowed palette of the overlay, or NULL */
+    void* _palette;              /* opaque palette overlay: saved pairs, strings */
+
     void* _owned;                /* opaque heap-string registry */
 } MD_ANSI_STYLE;
 
@@ -130,6 +133,16 @@ MD_ANSI_STYLE* md_ansi_style_create_from_generic(fy_generic root,
                                                  const MD_ANSI_STYLE_OPTS* opts);
 
 void md_ansi_style_destroy(MD_ANSI_STYLE* s);
+
+struct fypal_ctx;
+
+/* Overlay the element pairs with the roles of a libfypalette context. An
+ * element whose role the palette defines takes the escapes of the role; every
+ * other element keeps the pair of its theme. A later call replaces the overlay
+ * and a NULL palette removes it. The palette is borrowed and the escapes are
+ * copied, so call again after the palette changes variant or capabilities.
+ * Returns 0, or -1 on allocation failure or without palette support. */
+int md_ansi_style_set_palette(MD_ANSI_STYLE* s, struct fypal_ctx* palette);
 
 #ifdef __cplusplus
 }

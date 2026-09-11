@@ -16,6 +16,11 @@ if(@FYMD4C_STATIC_NEEDS_FYTS@)
     find_dependency(libfyts)
 endif()
 
+# Built with palette styling: both flavours link libfypalette.
+if(@FYMD4C_NEEDS_FYPALETTE@)
+    find_dependency(libfypalette)
+endif()
+
 include(${CMAKE_CURRENT_LIST_DIR}/libfymd4c-targets.cmake)
 
 # Consistent naming: libfymd4c::libfymd4c (shared) and ::libfymd4c_static.

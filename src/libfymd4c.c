@@ -46,6 +46,7 @@ struct fymd_renderer {
 #ifdef MD4C_WITH_FYTS
     struct fyts_ctx *fyts_ctx;
 #endif
+    struct fypal_ctx *palette;      /* borrowed; overlaid on style, or NULL */
 
     struct fymd_line_limit_opts limit;
     char *limit_separator;
@@ -609,6 +610,12 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
         style->table_border_none = 0;
     else if(r->cfg.table_border == FYMD_TB_NONE)
         style->table_border_none = 1;
+    /* A new theme keeps the palette laid over the old one. */
+    if(r->palette != NULL && md_ansi_style_set_palette(style, r->palette) != 0) {
+        md_ansi_style_destroy(style);
+        free(theme);
+        return -1;
+    }
     md_ansi_style_destroy(r->style);
 #ifdef MD4C_WITH_FYTS
     fyts_ctx_destroy(r->fyts_ctx);
@@ -621,6 +628,25 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
     r->cfg.style = NULL;
     r->cfg.style_path = NULL;
     r->cfg.theme = theme;
+    return 0;
+}
+
+int
+fymd_renderer_set_palette(struct fymd_renderer *r, struct fypal_ctx *palette)
+{
+    if(r == NULL || r->style == NULL || r->stream != NULL)
+        return -1;
+    if(md_ansi_style_set_palette(r->style, palette) != 0) {
+        /* The overlay is gone: the style is back on its theme. */
+        r->palette = NULL;
+        return -1;
+    }
+    r->palette = palette;
+#ifdef MD4C_WITH_FYTS
+    /* A retained highlighter holds the palette it was given. */
+    fyts_ctx_destroy(r->fyts_ctx);
+    r->fyts_ctx = NULL;
+#endif
     return 0;
 }
 
