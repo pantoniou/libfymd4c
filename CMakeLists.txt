@@ -238,6 +238,27 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(fenced-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME fenced-api COMMAND fenced-api-test)
 
+        if(MD4C_WITH_FYPALETTE)
+            add_executable(palette-api-test test/palette-api-test.c)
+            target_link_libraries(palette-api-test PRIVATE
+                libfymd4c::libfymd4c libfypalette::libfypalette)
+            if(MD4C_FYTS_PALETTE)
+                target_compile_definitions(palette-api-test PRIVATE FYMD_TEST_CODE_PALETTE)
+            endif()
+            add_test(NAME palette-api COMMAND palette-api-test)
+
+            add_test(NAME palette-cli
+                COMMAND "$<TARGET_FILE:fymd4c-cli>" --color=on --background=dark
+                        --palette=ember "${CMAKE_CURRENT_SOURCE_DIR}/test/palette.md")
+            set_tests_properties(palette-cli PROPERTIES
+                PASS_REGULAR_EXPRESSION "\\[1;38;2;[0-9]+;[0-9]+;[0-9]+mPlan")
+
+            add_test(NAME palette-cli-bad-theme
+                COMMAND "$<TARGET_FILE:fymd4c-cli>" --color=on --palette=no-such-theme
+                        "${CMAKE_CURRENT_SOURCE_DIR}/test/palette.md")
+            set_tests_properties(palette-cli-bad-theme PROPERTIES WILL_FAIL TRUE)
+        endif()
+
         add_test(
             NAME fenced-cli
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test"
