@@ -8,6 +8,9 @@
 add_executable(fymd4c-cli fymd4c.c)
 set_target_properties(fymd4c-cli PROPERTIES OUTPUT_NAME fymd4c)
 target_link_libraries(fymd4c-cli PRIVATE fymd4c)
+if(MD4C_WITH_FYPALETTE)
+    target_compile_definitions(fymd4c-cli PRIVATE MD4C_WITH_FYPALETTE)
+endif()
 target_compile_definitions(fymd4c-cli PRIVATE
     MD_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     MD_VERSION_MINOR=${PROJECT_VERSION_MINOR}

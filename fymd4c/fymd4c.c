@@ -15,6 +15,9 @@
 
 #include "md4c.h"          /* MD_FLAG_* dialect constants, MD_CHAR/MD_SIZE */
 #include <libfymd4c.h>
+#ifdef MD4C_WITH_FYPALETTE
+#include <libfypalette.h>
+#endif
 
 #ifdef _WIN32
     #include <io.h>
@@ -73,6 +76,7 @@ static const char* line_separator = NULL;
 static int table_fit_content = 0;
 static const char* style_path = NULL;
 static const char* theme_name = NULL;
+static const char* palette_theme = NULL;
 static enum fymd_background forced_bg = FYMD_BG_AUTO;
 static enum fymd_sgr_input sgr_input = FYMD_SGR_STRIP;
 static int forced_reverse = 0;
@@ -523,6 +527,7 @@ enum {
     OPT_TABLE_SIZE,
     OPT_STYLE,
     OPT_THEME,
+    OPT_PALETTE,
     OPT_BACKGROUND,
     OPT_SGR,
     OPT_REVERSE,
@@ -590,6 +595,7 @@ static const struct option long_options[] = {
     { "table-size",         required_argument, NULL, OPT_TABLE_SIZE },
     { "style",              required_argument, NULL, OPT_STYLE },
     { "theme",              required_argument, NULL, OPT_THEME },
+    { "palette",            required_argument, NULL, OPT_PALETTE },
     { "background",         required_argument, NULL, OPT_BACKGROUND },
     { "sgr",                required_argument, NULL, OPT_SGR },
     { "reverse",            no_argument,       NULL, OPT_REVERSE },
@@ -673,6 +679,7 @@ usage(void)
         "      --table-size=MODE  Table sizing: fill width (default) or fit to content\n"
         "      --style=FILE     YAML styling config (overrides the built-in default)\n"
         "      --theme=NAME     Embedded theme (append -borderless for grid-free tables)\n"
+        "      --palette=THEME  Colour from a libfypalette theme: a built-in name or a file\n"
         "      --background=MODE  Background for light/dark styles: auto (default), dark, light\n"
         "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
         "      --reverse        Render the whole document as a card (background filled to width)\n"
@@ -766,6 +773,7 @@ parse_args(int argc, char** argv)
                 want_stream = 1; want_stream_progressive = 1; break;
             case OPT_STYLE:       style_path = optarg; break;
             case OPT_THEME:       theme_name = optarg; break;
+            case OPT_PALETTE:     palette_theme = optarg; break;
             case OPT_HTML_TITLE:  html_title = optarg; break;
             case OPT_HTML_CSS:    css_path = optarg; break;
 
@@ -1006,6 +1014,48 @@ parse_args(int argc, char** argv)
     }
 }
 
+#ifdef MD4C_WITH_FYPALETTE
+/* A palette for a built-in theme name or a theme file, for the output that the
+ * colour and background options select. */
+static struct fypal_ctx*
+cli_palette_create(const char* theme, int use_color, int fd)
+{
+    struct fypal_caps caps;
+    struct fypal_ctx* palette;
+    int rc;
+
+    fypal_caps_detect(fd, &caps);
+    if(!use_color) {
+        caps.depth = FYPAL_DEPTH_NONE;
+        caps.attrs = 0;
+    } else if(caps.depth == FYPAL_DEPTH_NONE) {
+        caps.depth = FYPAL_DEPTH_TRUECOLOR;
+        caps.attrs = FYPAL_ATTR_ALL & ~FYPAL_ATTR_UNDERCURL;
+    }
+    palette = fypal_ctx_create(&caps);
+    if(palette == NULL) {
+        fprintf(stderr, "Cannot create a palette context.\n");
+        return NULL;
+    }
+    if(forced_bg == FYMD_BG_LIGHT)
+        fypal_ctx_set_variant(palette, FYPAL_VARIANT_LIGHT);
+    else if(forced_bg == FYMD_BG_DARK)
+        fypal_ctx_set_variant(palette, FYPAL_VARIANT_DARK);
+    else
+        fypal_ctx_set_variant(palette, fypal_detect_variant(fd, NULL));
+    if(strchr(theme, '/') != NULL || strstr(theme, ".yaml") != NULL)
+        rc = fypal_ctx_load_file(palette, theme);
+    else
+        rc = fypal_ctx_load_builtin(palette, theme);
+    if(rc != 0) {
+        fprintf(stderr, "%s\n", fypal_ctx_error(palette));
+        fypal_ctx_destroy(palette);
+        return NULL;
+    }
+    return palette;
+}
+#endif
+
 int
 main(int argc, char** argv)
 {
@@ -1015,6 +1065,9 @@ main(int argc, char** argv)
     struct fymd_renderer_cfg cfg;
     int ret = 0;
     int use_color;
+#ifdef MD4C_WITH_FYPALETTE
+    struct fypal_ctx* palette = NULL;
+#endif
     struct fymd_line_limit_opts limit_opts;
 
     parse_args(argc, argv);
@@ -1071,6 +1124,23 @@ main(int argc, char** argv)
         exit(1);
     }
 
+    if(palette_theme != NULL) {
+#ifdef MD4C_WITH_FYPALETTE
+        palette = cli_palette_create(palette_theme, use_color, fymd_fileno(out));
+        if(palette == NULL || fymd_renderer_set_palette(r, palette) != 0) {
+            if(palette != NULL)
+                fprintf(stderr, "Cannot apply palette %s.\n", palette_theme);
+            fymd_renderer_destroy(r);
+            fypal_ctx_destroy(palette);
+            exit(1);
+        }
+#else
+        fprintf(stderr, "--palette: built without libfypalette\n");
+        fymd_renderer_destroy(r);
+        exit(1);
+#endif
+    }
+
     memset(&limit_opts, 0, sizeof(limit_opts));
     limit_opts.mode = max_lines ? line_limit_mode : FYMD_LLM_NONE;
     limit_opts.max_lines = max_lines;
@@ -1089,6 +1159,9 @@ main(int argc, char** argv)
     if(out != stdout)
         fclose(out);
     fymd_renderer_destroy(r);
+#ifdef MD4C_WITH_FYPALETTE
+    fypal_ctx_destroy(palette);
+#endif
 
     return ret;
 }
