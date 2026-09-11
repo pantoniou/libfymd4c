@@ -258,6 +258,7 @@ typedef struct {
     int bold, faint, italic, underline, blink, reverse, conceal, strike, overline;
     char fg[24];   /* SGR params for the foreground, e.g. "31" or "38;5;12"; "" = default */
     char bg[24];   /* SGR params for the background; "" = default */
+    char ul[24];   /* SGR params for the underline colour, e.g. "58;5;12"; "" = default */
 } SGR_STATE;
 
 static void sgr_scan(SGR_STATE* s, const char* buf, MD_SIZE size);
@@ -896,13 +897,14 @@ sgr_apply(SGR_STATE* s, const int* vals, int count)
             case 55: s->overline = 0; break;
             case 39: s->fg[0] = '\0'; break;
             case 49: s->bg[0] = '\0'; break;
+            case 59: s->ul[0] = '\0'; break;
             default:
                 if((v >= 30 && v <= 37) || (v >= 90 && v <= 97))
                     snprintf(s->fg, sizeof(s->fg), "%d", v);
                 else if((v >= 40 && v <= 47) || (v >= 100 && v <= 107))
                     snprintf(s->bg, sizeof(s->bg), "%d", v);
-                else if(v == 38 || v == 48) {
-                    char* dst = (v == 38) ? s->fg : s->bg;
+                else if(v == 38 || v == 48 || v == 58) {
+                    char* dst = (v == 38) ? s->fg : (v == 48) ? s->bg : s->ul;
                     if(j + 1 < count && vals[j + 1] == 5 && j + 2 < count) {
                         snprintf(dst, sizeof(s->fg), "%d;5;%d", v, vals[j + 2]);
                         j += 2;
@@ -928,16 +930,26 @@ sgr_scan(SGR_STATE* s, const char* buf, MD_SIZE size)
         /* Only SGR (CSI ... 'm') sequences affect style state. */
         if(e >= 3 && (unsigned char) buf[i] == 0x1b && buf[i + 1] == '['
            && buf[i + e - 1] == 'm') {
-            int vals[32], count = 0, cur = 0, have = 0;
+            int vals[32], count = 0, cur = 0, have = 0, sub = 0, subval = 0;
             MD_SIZE p;
+            /* A ':' sub-parameter (ISO 8613-6) refines its parameter: 4:3 is
+             * a curly underline and stays an underline here. Only 4:0 turns
+             * the underline off. */
             for(p = i + 2; p < i + e - 1; p++) {
                 char c = buf[p];
-                if(c >= '0' && c <= '9') { cur = cur * 10 + (c - '0'); have = 1; }
+                if(c >= '0' && c <= '9') {
+                    if(sub) subval = subval * 10 + (c - '0');
+                    else cur = cur * 10 + (c - '0');
+                    have = 1;
+                }
+                else if(c == ':') { sub = 1; subval = 0; }
                 else if(c == ';') {
+                    if(sub && cur == 4 && subval == 0) cur = 24;
                     if(count < (int)(sizeof(vals)/sizeof(vals[0]))) vals[count++] = cur;
-                    cur = 0; have = 1;
+                    cur = 0; have = 1; sub = 0;
                 }
             }
+            if(sub && cur == 4 && subval == 0) cur = 24;
             if(have && count < (int)(sizeof(vals)/sizeof(vals[0]))) vals[count++] = cur;
             if(count == 0) { memset(s, 0, sizeof(*s)); }  /* "ESC[m" == reset */
             else sgr_apply(s, vals, count);
@@ -951,7 +963,7 @@ sgr_scan(SGR_STATE* s, const char* buf, MD_SIZE size)
 static size_t
 sgr_build(const SGR_STATE* s, char* out, size_t cap)
 {
-    char params[96];
+    char params[128];
     size_t n = 0;
     #define SGR_PUT(str)                                              \
         do {                                                          \
@@ -970,6 +982,7 @@ sgr_build(const SGR_STATE* s, char* out, size_t cap)
     if(s->overline)  SGR_PUT("53");
     if(s->fg[0])     SGR_PUT(s->fg);
     if(s->bg[0])     SGR_PUT(s->bg);
+    if(s->ul[0])     SGR_PUT(s->ul);
     #undef SGR_PUT
     params[n] = '\0';
     if(n == 0)
