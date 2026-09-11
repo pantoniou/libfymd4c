@@ -69,6 +69,13 @@ Use an embedded document theme. Available names are \fBdefault\fR,
 Each non-default theme also has a \fB-borderless\fR variant.
 .
 .TP
+.B --palette= \fITHEME\fR
+Take the colours from a libfypalette theme: a built-in name such as
+\fBember\fR, or a theme file. Elements the palette does not style keep the
+colours of the document theme. The variant follows \fB--background\fR.
+Available only when fymd4c is built with libfypalette.
+.
+.TP
 .B --background= \fIMODE\fR
 Assume terminal background: \fBauto\fR (default), \fBdark\fR, or \fBlight\fR.
 .

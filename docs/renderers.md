@@ -51,6 +51,56 @@ internally) can hand it straight to the renderer without re-serializing to text.
 The generic is only read (all strings are copied), so the caller may free its
 builder immediately after `fymd_renderer_create()`.
 
+### Palette styling
+
+When libfymd4c is built with libfypalette, a renderer can take its colours
+from a palette context in addition to its theme:
+
+```c
+struct fypal_ctx *palette = fypal_ctx_create(&caps);
+
+fypal_ctx_load_builtin(palette, "ember");
+fymd_renderer_set_palette(r, palette);
+```
+
+Each element whose role the palette defines takes the escapes of that role.
+Every other element keeps the pair of its theme. The roles are:
+
+| element | role | element | role |
+|---|---|---|---|
+| heading | `md.heading` | table header | `md.table.header` |
+| strong | `md.strong` | table header row | `md.table.header.row` * |
+| emphasis | `md.emphasis` | odd / even rows | `md.table.row.odd` / `.even` * |
+| underline | `md.underline` | diff added / removed | `diff.add` / `diff.del` * |
+| strikethrough | `md.strike` | diff context | `diff.context` * |
+| inline code | `md.code` | diff hunk / file | `diff.hunk` / `diff.file` * |
+| math | `md.math` | diff line numbers | `diff.lineno` * |
+| link / URL | `md.link` / `md.link.url` | list marker | `md.bullet` |
+| wiki link | `md.link.wiki` | done task | `md.task.done` |
+| blockquote bar | `md.quote.bar` | document card | `md.card` * |
+| plain fenced code | `code.plain` | indicators | `tool.pending` / `tool.ok` / `tool.fail` |
+| rules | `md.rule` | | |
+
+A role query answers with the nearest defined ancestor, so `md.link.wiki`
+takes `md.link` when the theme does not define it. A role marked * must be
+defined itself: the ancestor of a row or a card styles another extent.
+
+Fenced code is highlighted through the `code.*` roles when the libfyts in use
+supports a palette; see the libfyts documentation for the capture roles.
+`fymd_renderer_get_style_pair()` and `fymd_renderer_get_indicator()` return the
+palette pairs, so an application that draws its own chrome uses the same
+colours as the document.
+
+The palette is borrowed and must stay alive while the renderer uses it. The
+escapes are copied when the palette is set, so set it again after the palette
+changes its variant or capabilities. `fymd_renderer_set_theme()` keeps the
+palette. `NULL` returns to the theme. The call is rejected while a progressive
+stream exists and when the library is built without libfypalette.
+
+The build uses libfypalette when it finds the package: `-DMD4C_FYPALETTE=on`
+makes it required and `-DMD4C_FYPALETTE=off` disables it. `fymd4c
+--palette=ember` renders with a palette theme.
+
 ```c
 
 /* One-shot. */

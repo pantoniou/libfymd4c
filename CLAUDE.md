@@ -42,6 +42,16 @@ link libfyts' **static** target — `libfyts::fyts_static` (installed) or
 grammars are absorbed into the shared libfymd4c. `MD4C_FYTS_CATALOGUE`
 (minimal/default/full) selects the grammars, and applies to `fetch` mode only.
 
+**libfypalette** is optional (`MD4C_FYPALETTE` = `auto`/`on`/`off`). With it,
+`fymd_renderer_set_palette()` overlays the style pairs with palette roles
+(`md_ansi_style_set_palette()` in `md4c-style.c`, which keeps the theme pairs so
+the overlay can be removed) and hands the palette to libfyts. The palette
+pointer travels on `MD_ANSI_STYLE`, which every render path already carries, so
+no internal signature takes it. Fenced code uses it only when the installed
+libfyts states `libfyts_HAVE_FYPALETTE` (`MD4C_FYTS_PALETTE`). The theme keeps
+the policy: no role colour or role name choice other than the element-to-role
+table belongs in C. Keep the build and the tests correct with and without it.
+
 ## The public API (libfymd4c)
 
 `include/libfymd4c.h` →
@@ -121,7 +131,7 @@ ctest --test-dir build-asan -j$(nproc)
 build-system change:
 
 ```sh
-nm -D --defined-only build/src/libfymd4c.so | grep ' T '   # must be 15 fymd_*
+nm -D --defined-only build/src/libfymd4c.so | awk '$2 == "T" {print $3}' | grep -v '^fymd_'   # must be empty
 ```
 
 The `stream` ctest enforces the other core invariant: `--stream` and
