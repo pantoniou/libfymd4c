@@ -18,6 +18,15 @@ target_compile_definitions(fymd4c-cli PRIVATE
 )
 
 
+# fymd-ui: renders UI Markdown and reports its clickable regions, to check
+# the layout by eye and from the tests. It is not installed.
+add_executable(fymd-ui fymd-ui.c)
+target_link_libraries(fymd-ui PRIVATE fymd4c)
+if(MD4C_WITH_FYPALETTE)
+    target_link_libraries(fymd-ui PRIVATE libfypalette::libfypalette)
+    target_compile_definitions(fymd-ui PRIVATE MD4C_WITH_FYPALETTE)
+endif()
+
 # Install rules
 
 install(
