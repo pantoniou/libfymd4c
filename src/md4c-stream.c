@@ -230,8 +230,13 @@ region_ends_open_fence(const char* data, size_t size)
  * safe to commit. Without libfyts there is no highlighter at all, so fenced
  * code is always verbatim and every fence is safe. */
 static int
-lang_progressive_unsafe(const char* lang, size_t n)
+lang_progressive_unsafe(const MD_ANSI_STYLE* style, const char* lang, size_t n)
 {
+    /* A block renderer draws the closed block as a whole: it is not
+     * progressive, so no interior line may be committed on its own. */
+    if(md_ansi_style_block_renderer(style, lang, n) != NULL)
+        return 1;
+
     /* A diff/patch fence is rendered as a whole (line numbers come from the
      * "@@" hunk header above, the content is highlighted as one unit), so an
      * interior line committed on its own would not match the one-shot render. */
@@ -320,6 +325,10 @@ fence_context(const char* data, size_t offset, char* lang_out, size_t lang_cap,
 static int
 stream_code_highlighted(MD4C_STREAM* s)
 {
+    /* A block renderer buffers its block as a highlighted fence does. */
+    if(s->style != NULL && md_ansi_style_block_renderer(s->style, s->code_lang,
+                                                        s->code_lang_size) != NULL)
+        return 1;
 #ifdef MD4C_WITH_FYTS
     char buf[64];
     if(s->style != NULL && s->style->code_enabled && s->code_lang_size > 0
@@ -532,7 +541,8 @@ html_block_ends(const char* line, size_t llen, int type)
  * still render-verified (memcmp) by the caller, so a misdetected fence is never
  * acted on. Returns `from` if there is no such point. */
 static size_t
-next_sync_offset(const char* data, size_t size, size_t from)
+next_sync_offset(const MD_ANSI_STYLE* style, const char* data, size_t size,
+                 size_t from)
 {
     size_t i = 0, line_start = 0, best = from, fence_len = 0, run;
     int in_fence = 0, fence_col0 = 0;
@@ -572,7 +582,7 @@ next_sync_offset(const char* data, size_t size, size_t from)
                 ls = 0;
                 while(j + ls < llen && line[j + ls] != ' ' && line[j + ls] != '\t')
                     ls++;
-                fence_markup = lang_progressive_unsafe(line + j, ls);
+                fence_markup = lang_progressive_unsafe(style, line + j, ls);
             } else {
                 int t = html_block_start_type(line + k, llen - k);
                 if(t) {
@@ -804,7 +814,7 @@ md4c_stream_push(MD4C_STREAM* s, const char* chunk, size_t len,
      * segment between the old and new anchor, but only after verifying its
      * standalone render is a true prefix of the active-region render (so a
      * construct that unexpectedly spans the point is never committed). */
-    sync = next_sync_offset(s->accum.data, s->accum.size, s->anchor);
+    sync = next_sync_offset(s->style, s->accum.data, s->accum.size, s->anchor);
     if(sync > s->anchor) {
         if(stream_render(s, &s->seg, s->accum.data + s->anchor,
                          sync - s->anchor, 0, 1) != 0)
@@ -988,7 +998,7 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
      * so a line is frozen only where healing did not change it. The frozen lines
      * (including the leading separator) become permanent (reported via freeze)
      * and drop out of the mutable active region. */
-    sync = next_sync_offset(s->accum.data, s->accum.size, s->anchor);
+    sync = next_sync_offset(s->style, s->accum.data, s->accum.size, s->anchor);
     if(sync > s->anchor) {
         size_t sep = stream_needs_sep(s) ? 1 : 0;
         if(stream_render(s, &s->out, s->accum.data + s->anchor,
