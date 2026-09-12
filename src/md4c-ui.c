@@ -360,7 +360,8 @@ typedef struct {
     size_t start;
     size_t len;         /* without the newline */
     int newline;
-    int type;           /* ROW_CONTENT, ROW_VFILL, ROW_SCROLL, ROW_END */
+    int type;           /* ROW_CONTENT, ROW_VFILL, ROW_SCROLL, ROW_END,
+                           ROW_DROP, ROW_DROP_END */
     int anchor_top;     /* ROW_SCROLL */
     int keep;           /* ROW_CONTENT */
     size_t pad;         /* ROW_VFILL: blank rows it becomes */
@@ -371,9 +372,11 @@ typedef struct {
     size_t slot_row;    /* the first output row of its blank rows */
     int weight;         /* ROW_VFILL: its share of the rows left over */
     int min;            /* ROW_VFILL: the rows it keeps */
+    int order;          /* ROW_DROP: lower orders go first */
+    int dropped;        /* ROW_VFILL in a dropped body: no rows, no minimum */
 } UI_ROW;
 
-enum { ROW_CONTENT, ROW_VFILL, ROW_SCROLL, ROW_END };
+enum { ROW_CONTENT, ROW_VFILL, ROW_SCROLL, ROW_END, ROW_DROP, ROW_DROP_END };
 
 int
 md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
@@ -434,6 +437,12 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
                                          memcmp(arg, "top", 3) == 0;
             } else if(md_ui_marker_is(kind, kl, "/scroll")) {
                 rows[nrows].type = ROW_END;
+            } else if(md_ui_marker_is(kind, kl, "drop")) {
+                rows[nrows].type = ROW_DROP;
+                if(arg != NULL && md_ui_arg_nums(arg, al, &idl, nums, 1) == 0)
+                    rows[nrows].order = nums[0];
+            } else if(md_ui_marker_is(kind, kl, "/drop")) {
+                rows[nrows].type = ROW_DROP_END;
             }
         }
         if(rows[nrows].type == ROW_CONTENT)
@@ -446,6 +455,42 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
     for(i = 0; i < nrows; i++)
         if(rows[i].type == ROW_VFILL)
             minsum += (size_t) rows[i].min;
+
+    /*
+     * A page that is too tall loses whole drop bodies before a scroll body
+     * gives up a row: the lowest order first, and of equal orders the later
+     * body first. A body without its close is not a body, and bodies do not
+     * nest: a body ends at the first close after it.
+     */
+    while(height > 0 && content + minsum > (size_t) height) {
+        size_t best = nrows, best_end = 0;
+
+        for(i = 0; i < nrows; i++) {
+            if(rows[i].type != ROW_DROP || !rows[i].keep)
+                continue;
+            for(j = i + 1; j < nrows && rows[j].type != ROW_DROP_END; j++)
+                ;
+            if(j == nrows)
+                continue;
+            if(best == nrows || rows[i].order <= rows[best].order) {
+                best = i;
+                best_end = j;
+            }
+        }
+        if(best == nrows)
+            break;
+        rows[best].keep = 0;
+        for(k = best + 1; k < best_end; k++) {
+            if(rows[k].type == ROW_CONTENT && rows[k].keep) {
+                rows[k].keep = 0;
+                content--;
+            } else if(rows[k].type == ROW_VFILL && !rows[k].dropped) {
+                rows[k].dropped = 1;
+                minsum -= (size_t) rows[k].min;
+                nvfill--;
+            }
+        }
+    }
     if(height > 0 && nvfill > 0 && content + minsum <= (size_t) height) {
         int* w = (int*) calloc(nvfill, sizeof(int));
         int* mn = (int*) calloc(nvfill, sizeof(int));
@@ -457,41 +502,41 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
             goto err;
         }
         for(i = 0, k = 0; i < nrows; i++)
-            if(rows[i].type == ROW_VFILL) {
+            if(rows[i].type == ROW_VFILL && !rows[i].dropped) {
                 w[k] = rows[i].weight;
                 mn[k] = rows[i].min;
                 k++;
             }
         md_ui_share((int)((size_t) height - content), w, mn, (int) nvfill, share);
         for(i = 0, k = 0; i < nrows; i++)
-            if(rows[i].type == ROW_VFILL)
+            if(rows[i].type == ROW_VFILL && !rows[i].dropped)
                 rows[i].pad = (size_t) share[k++];
         free(w);
         free(mn);
         free(share);
     } else if(height > 0 && content + minsum > (size_t) height) {
         for(i = 0; i < nrows; i++)
-            if(rows[i].type == ROW_VFILL)
+            if(rows[i].type == ROW_VFILL && !rows[i].dropped)
                 rows[i].pad = (size_t) rows[i].min;
         over = content + minsum - (size_t) height;
         for(i = 0; i < nrows && over > 0; i++) {
             if(rows[i].type != ROW_SCROLL)
                 continue;
             for(j = i + 1, body = 0; j < nrows && rows[j].type != ROW_END; j++)
-                if(rows[j].type == ROW_CONTENT)
+                if(rows[j].type == ROW_CONTENT && rows[j].keep)
                     body++;
             take = body < over ? body : over;
             over -= take;
             if(rows[i].anchor_top) {
                 /* keep the top: take the last rows of the body */
                 for(k = j; k > i + 1 && take > 0; k--)
-                    if(rows[k - 1].type == ROW_CONTENT) {
+                    if(rows[k - 1].type == ROW_CONTENT && rows[k - 1].keep) {
                         rows[k - 1].keep = 0;
                         take--;
                     }
             } else {
                 for(k = i + 1; k < j && take > 0; k++)
-                    if(rows[k].type == ROW_CONTENT) {
+                    if(rows[k].type == ROW_CONTENT && rows[k].keep) {
                         rows[k].keep = 0;
                         take--;
                     }

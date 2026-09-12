@@ -3644,7 +3644,7 @@ ui_slot_block(MD_ANSI* r, const MD_UI_TAG* t)
     r->need_newline = 1;
 }
 
-/* The fy-* tags of an HTML block: columns, vfill, scroll and slot. */
+/* The fy-* tags of an HTML block: columns, vfill, scroll, drop and slot. */
 static void
 ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
 {
@@ -3714,6 +3714,18 @@ ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
             } else {
                 v = md_ui_tag_attr(&t, "anchor", &vl);
                 ui_row_marker(r, "scroll", v, v ? vl : 0);
+            }
+        } else if(md_ui_tag_is(&t, "drop")) {
+            if(t.closing) {
+                ui_row_marker(r, "/drop", NULL, 0);
+            } else {
+                char arg[16];
+                int order = 0, kind, n;
+                v = md_ui_tag_attr(&t, "order", &vl);
+                if(v != NULL)
+                    ui_size_parse(v, vl, &kind, &order);
+                n = snprintf(arg, sizeof(arg), "%d", order);
+                ui_row_marker(r, "drop", arg, (size_t) n);
             }
         } else if(md_ui_tag_is(&t, "slot") && !t.closing) {
             ui_slot_block(r, &t);
