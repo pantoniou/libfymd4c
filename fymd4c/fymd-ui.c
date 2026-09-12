@@ -17,7 +17,8 @@
 #endif
 
 static const char demo[] =
-    "## Work<fy-fill/><fy-role name=\"chrome\">3 files</fy-role>\n"
+    "## Work <fy-slot id=\"spin\" width=\"1\"/>"
+    "<fy-fill/><fy-role name=\"chrome\">3 files</fy-role>\n"
     "\n"
     "<fy-scroll anchor=\"bottom\">\n"
     "\n"
@@ -44,11 +45,97 @@ static const char demo[] =
     "</fy-col>\n"
     "</fy-columns>\n"
     "\n"
+    "<fy-slot id=\"preview\"/>\n"
+    "\n"
     "<fy-vfill/>\n"
     "\n"
     "<fy-glyph name=\"gutter.tool\" fallback=\"->\"/> "
     "<fy-act id=\"cmd:run\">run</fy-act><fy-fill/>"
     "<fy-act id=\"cmd:quit\">quit</fy-act>\n";
+
+/* The Markdown that the preview slot renders with a renderer of its own. */
+static const char preview[] =
+    "> **foo.c** <fy-fill/><fy-act id=\"diff:foo.c\">diff</fy-act>\n";
+
+/* Regions of a nested render, in the coordinates of that render. */
+struct nested_region {
+    char slot[64];
+    char id[64];
+    size_t row;
+    int col;
+    int width;
+};
+
+struct slot_ctx {
+    int color;
+    enum fymd_palette_flags palette_flags;
+    void *palette;
+    struct nested_region nested[16];
+    size_t nnested;
+};
+
+static const char *
+no_margin(void *userdata, size_t row)
+{
+    (void) userdata;
+    (void) row;
+    return "";
+}
+
+/* Draw a slot: a spinner frame, or a preview rendered recursively. */
+static int
+slot_render(void *userdata, const char *id, int width, int height,
+            enum fymd_block_flags flags, fymd_block_emit_fn emit, void *emit_ctx)
+{
+    struct slot_ctx *sc = userdata;
+    const struct fymd_region *rg;
+    struct fymd_renderer_cfg cfg;
+    struct fymd_renderer *inner;
+    char *out = NULL;
+    size_t len = 0, count, i;
+
+    (void) height;
+    if(!strcmp(id, "spin")) {
+        emit(emit_ctx, "*", 1);
+        return 0;
+    }
+    if(strcmp(id, "preview") != 0)
+        return -1;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.flags = FYMD_RF_DEFAULT | FYMD_RF_UI |
+                ((flags & FYMD_BF_NO_COLOR) ? FYMD_RF_NO_COLOR : 0);
+    cfg.width = width + 2;          /* the inner right margin */
+    cfg.background = FYMD_BG_DARK;
+    inner = fymd_renderer_create(&cfg);
+    if(inner == NULL)
+        return -1;
+#ifdef MD4C_WITH_FYPALETTE
+    if(sc->palette != NULL)
+        (void) fymd_renderer_set_palette_flags(inner, sc->palette,
+                                               sc->palette_flags);
+#endif
+    if(fymd_render_with_margins(inner, preview, sizeof(preview) - 1,
+                                no_margin, NULL, &out, &len) != 0) {
+        fymd_renderer_destroy(inner);
+        return -1;
+    }
+    /* keep the inner regions to place them once the slot has a position */
+    if(fymd_renderer_get_regions(inner, &rg, &count) == 0)
+        for(i = 0; i < count && sc->nnested < 16; i++) {
+            struct nested_region *nr = &sc->nested[sc->nnested++];
+            snprintf(nr->slot, sizeof(nr->slot), "%s", id);
+            snprintf(nr->id, sizeof(nr->id), "%s", rg[i].id);
+            nr->row = rg[i].row;
+            nr->col = rg[i].col;
+            nr->width = rg[i].width;
+        }
+    while(len > 0 && out[len - 1] == '\n')
+        len--;
+    emit(emit_ctx, out, len);
+    fymd_free(out);
+    fymd_renderer_destroy(inner);
+    return 0;
+}
 
 static void
 usage(FILE *fp, const char *prog)
@@ -112,9 +199,11 @@ main(int argc, char **argv)
     struct fymd_renderer_cfg cfg;
     const struct fymd_region *regions;
     struct fymd_renderer *r;
+    struct slot_ctx slots;
     const char *palette_name = NULL, *id;
     char *src = NULL, *out = NULL;
-    size_t len, out_len, count, i, click_row = 0;
+    size_t len, out_len, count = 0, i, j, click_row = 0;
+    const char *nested_hit = NULL;
     int width = 60, height = 0, color = -1, light = 0, ascii = 0, no_ui = 0;
     int show_regions = 0, click = 0, click_col = 0, opt, rc = 1;
     FILE *fp;
@@ -177,6 +266,13 @@ main(int argc, char **argv)
         fprintf(stderr, "cannot create a renderer\n");
         goto out;
     }
+    memset(&slots, 0, sizeof(slots));
+    slots.color = color;
+    slots.palette_flags = ascii ? FYMD_PF_ASCII : 0;
+    if(fymd_renderer_set_slot_renderer(r, slot_render, &slots) != 0) {
+        fprintf(stderr, "cannot set the slot renderer\n");
+        goto out;
+    }
     if(palette_name != NULL) {
 #ifdef MD4C_WITH_FYPALETTE
         fypal_caps_detect(STDOUT_FILENO, &caps);
@@ -195,10 +291,12 @@ main(int argc, char **argv)
            fypal_ctx_load_builtin(palette, palette_name) != 0 ||
            fymd_renderer_set_palette_flags(r, palette,
                                            ascii ? FYMD_PF_ASCII : 0) != 0) {
+            slots.palette = NULL;
             fprintf(stderr, "cannot apply palette %s: %s\n", palette_name,
                     palette ? fypal_ctx_error(palette) : "no context");
             goto out;
         }
+        slots.palette = palette;
 #else
         (void) ascii;
         fprintf(stderr, "--palette: built without libfypalette\n");
@@ -219,10 +317,28 @@ main(int argc, char **argv)
     }
     if(show_regions)
         for(i = 0; i < count; i++)
-            printf("region %s row=%zu col=%d width=%d\n", regions[i].id,
-                   regions[i].row, regions[i].col, regions[i].width);
+            printf("region %s row=%zu col=%d width=%d height=%d kind=%s\n",
+                   regions[i].id, regions[i].row, regions[i].col,
+                   regions[i].width, regions[i].height,
+                   regions[i].kind == FYMD_REGION_SLOT ? "slot" : "act");
+    /* a nested region is placed at the position of its slot */
+    for(j = 0; j < slots.nnested; j++) {
+        const struct nested_region *nr = &slots.nested[j];
+        for(i = 0; i < count; i++) {
+            if(regions[i].kind != FYMD_REGION_SLOT || strcmp(regions[i].id, nr->slot))
+                continue;
+            if(show_regions)
+                printf("region %s row=%zu col=%d width=%d height=1 kind=act slot=%s\n",
+                       nr->id, regions[i].row + nr->row, regions[i].col + nr->col,
+                       nr->width, nr->slot);
+            if(click && click_row == regions[i].row + nr->row &&
+               click_col >= regions[i].col + nr->col &&
+               click_col < regions[i].col + nr->col + nr->width)
+                nested_hit = nr->id;
+        }
+    }
     if(click) {
-        id = fymd_renderer_region_at(r, click_row, click_col);
+        id = nested_hit ? nested_hit : fymd_renderer_region_at(r, click_row, click_col);
         printf("click %zu,%d: %s\n", click_row, click_col, id ? id : "none");
     }
     rc = 0;
