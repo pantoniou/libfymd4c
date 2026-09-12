@@ -17,6 +17,17 @@
 /* Every role has a colour of its own, so the output says which role styled
  * an element. */
 static const char theme[] =
+    "params:\n"
+    "  gutter.cols: 3\n"
+    "glyphs:\n"
+    "  md:\n"
+    "    bullet: {utf: \"\u2022\", ascii: \"+\"}\n"
+    "    task:\n"
+    "      done: {utf: \"\u2714\", ascii: \"v\"}\n"
+    "      open: {utf: \"\u2610\", ascii: \"o\"}\n"
+    "  tool:\n"
+    "    pending: {utf: \"\u2192\", ascii: \"->\", 1: \" \"}\n"
+    "    ok: \"\u2192\"\n"
     "colors:\n"
     "  head: '#0a0a0a'\n"
     "  sub: '#111111'\n"
@@ -44,6 +55,10 @@ static const char doc[] =
     "## Steps\n"
     "\n"
     "Use `peek` and [the notes](http://example.com).\n"
+    "\n"
+    "- one\n"
+    "- [x] done\n"
+    "- [ ] open\n"
     "\n"
     "```c\n"
     "int f(void) { return 1; }\n"
@@ -121,7 +136,7 @@ main(void)
     struct fymd_update upd;
     struct fypal_ctx *palette;
     struct fymd_renderer *r;
-    const char *on, *off, *fin;
+    const char *on, *off, *fin, *glyph;
     char *out;
     size_t len;
 
@@ -156,7 +171,37 @@ main(void)
     /* fenced code takes the code.* roles through libfyts */
     expect(__LINE__, out, "38;2;15;15;15", NULL);
 #endif
+    /* the palette gives the glyphs and the document margin */
+    expect(__LINE__, out, "\n   Use", NULL);
+    expect(__LINE__, out, "\u2022 ", "* ");
+    expect(__LINE__, out, "\u2714\033", "[x]");
+    expect(__LINE__, out, "\u2610 open", "[ ]");
     fymd_free(out);
+
+    /* the pending indicator blinks through the frames of the palette */
+    CHECK(fymd_renderer_get_indicator(r, FYMD_INDICATOR_PENDING, 0, &glyph,
+                                      NULL, NULL, NULL) == 0);
+    expect(__LINE__, glyph, "\u2192", NULL);
+    CHECK(fymd_renderer_get_indicator(r, FYMD_INDICATOR_PENDING, 1, &glyph,
+                                      NULL, NULL, NULL) == 0);
+    CHECK(glyph != NULL && !strcmp(glyph, " "));
+    CHECK(fymd_renderer_get_indicator(r, FYMD_INDICATOR_PENDING, 2, &glyph,
+                                      NULL, NULL, NULL) == 0);
+    expect(__LINE__, glyph, "\u2192", NULL);
+    CHECK(fymd_renderer_get_indicator(r, FYMD_INDICATOR_SUCCESS, 0, &glyph,
+                                      NULL, NULL, NULL) == 0);
+    expect(__LINE__, glyph, "\u2192", NULL);
+
+    /* the ASCII form */
+    CHECK(fymd_renderer_set_palette_flags(r, palette, FYMD_PF_ASCII) == 0);
+    out = render(r);
+    expect(__LINE__, out, "+ ", "\u2022");
+    expect(__LINE__, out, "o open", "\u2610");
+    fymd_free(out);
+    CHECK(fymd_renderer_get_indicator(r, FYMD_INDICATOR_PENDING, 0, &glyph,
+                                      NULL, NULL, NULL) == 0);
+    CHECK(glyph != NULL && !strcmp(glyph, "->"));
+    CHECK(fymd_renderer_set_palette(r, palette) == 0);
 
     /* an application that draws its own chrome gets the palette pairs */
     CHECK(fymd_renderer_get_style_pair(r, FYMD_STYLE_HEADING, &on, &off) == 0);
@@ -195,6 +240,9 @@ main(void)
     out = render(r);
     expect(__LINE__, out, "Plan", "38;2;10;10;10");
     expect(__LINE__, out, NULL, "38;2;12;12;12");
+    /* the theme glyphs and margin return too */
+    expect(__LINE__, out, "\n  Use", "\u2022");
+    expect(__LINE__, out, "[ ] open", "\n   Use");
     fymd_free(out);
     CHECK(fymd_renderer_get_style_pair(r, FYMD_STYLE_HEADING, &on, &off) == 0);
     expect(__LINE__, on, NULL, "38;2;10;10;10");
