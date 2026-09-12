@@ -79,7 +79,9 @@ configure_file(libfymd4c.pc.in libfymd4c.pc @ONLY)
 # back to the raw library path if the package is unavailable. Keep the shared
 # and static dependencies separate so libfymd4c_static does not pull in the
 # shared libfyaml target when libfyaml's static target is installed.
-find_package(libfyaml CONFIG QUIET)
+if(NOT TARGET libfyaml::libfyaml)
+    find_package(libfyaml CONFIG QUIET)
+endif()
 if(TARGET libfyaml::libfyaml)
     set(_fymd4c_fyaml_shared libfyaml::libfyaml)
 else()
@@ -166,12 +168,21 @@ foreach(_t fymd4c fymd4c_static)
     endif()
     if(MD4C_WITH_FYPALETTE)
         target_compile_definitions(${_t} PRIVATE MD4C_WITH_FYPALETTE)
-        target_link_libraries(${_t} PUBLIC libfypalette::libfypalette)
     endif()
     if(MD4C_FYTS_PALETTE)
         target_compile_definitions(${_t} PRIVATE MD4C_FYTS_PALETTE)
     endif()
 endforeach()
+
+if(MD4C_WITH_FYPALETTE)
+    target_link_libraries(fymd4c PUBLIC libfypalette::libfypalette)
+    if(TARGET libfypalette::libfypalette_static)
+        target_link_libraries(fymd4c_static PUBLIC
+            libfypalette::libfypalette_static)
+    else()
+        target_link_libraries(fymd4c_static PUBLIC libfypalette::libfypalette)
+    endif()
+endif()
 
 # libfyaml is a public dependency of both flavours. The static fymd4c archive
 # must prefer libfyaml's static archive when the package provides it.
