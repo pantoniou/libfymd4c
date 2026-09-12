@@ -225,6 +225,34 @@ const char *fymd_theme_name(size_t index) FYMD_EXPORT;
  * inline/file style and is rejected after progressive streaming has begun. */
 int fymd_renderer_set_theme(struct fymd_renderer *r, const char *name) FYMD_EXPORT;
 
+/* Output of a block renderer: @len bytes of @data, rows separated by '\n'. */
+typedef void (*fymd_block_emit_fn)(void *emit_ctx, const char *data, size_t len);
+
+/* Facts about the render that a block renderer draws into. */
+enum fymd_block_flags {
+    FYMD_BF_NO_COLOR = FYMD_BIT(0)     /* the render has no colour */
+};
+
+/* Draw the body of a fenced block of a Markdown document. @lang is the
+ * language of the info string, @text and @len the body, and @width the
+ * columns a row may use (0 means unlimited). Emit the rows through @emit and
+ * return 0, or return -1 to render the block as code; the output of a declined
+ * call is discarded. The call is not progressive: it is made for a closed
+ * fence only. It is never made for a diff block, for fymd_render_fenced(), or
+ * for a fence that a stream has not closed yet, which renders as code until
+ * it closes. */
+typedef int (*fymd_block_render_fn)(void *userdata, const char *lang,
+        const char *text, size_t len, int width, enum fymd_block_flags flags,
+        fymd_block_emit_fn emit, void *emit_ctx);
+
+/* Register @fn for fenced blocks whose language is exactly @lang (1 to 63
+ * bytes; copied). A later call for the same language replaces the renderer and
+ * a NULL @fn removes it. fymd_renderer_set_theme() keeps the renderers.
+ * Rejected while a progressive stream exists. Returns 0 on success, -1
+ * otherwise. */
+int fymd_renderer_set_block_renderer(struct fymd_renderer *r, const char *lang,
+        fymd_block_render_fn fn, void *userdata) FYMD_EXPORT;
+
 struct fypal_ctx;
 
 /* Style the document through the roles of a libfypalette context. Each element

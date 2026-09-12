@@ -539,6 +539,22 @@ md_ansi_style_set_palette(MD_ANSI_STYLE* s, struct fypal_ctx* palette)
 #endif
 }
 
+const MD_BLOCK_RENDERER*
+md_ansi_style_block_renderer(const MD_ANSI_STYLE* s, const char* lang, size_t len)
+{
+    const MD_BLOCK_RENDERER* br;
+    size_t i;
+
+    if(s == NULL || lang == NULL || len == 0)
+        return NULL;
+    for(i = 0; i < s->n_block_renderers; i++) {
+        br = &s->block_renderers[i];
+        if(strlen(br->lang) == len && memcmp(br->lang, lang, len) == 0)
+            return br;
+    }
+    return NULL;
+}
+
 void
 md_ansi_style_destroy(MD_ANSI_STYLE* s)
 {

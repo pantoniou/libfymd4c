@@ -11,10 +11,19 @@
 #include <stddef.h>
 
 #include <libfyaml/libfyaml-generic.h>
+#include <libfymd4c/libfymd4c-util.h>
+#include <libfymd4c/libfymd4c-renderer.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* A renderer registered for the fenced blocks of one language. */
+typedef struct MD_BLOCK_RENDERER {
+    char* lang;
+    fymd_block_render_fn fn;
+    void* userdata;
+} MD_BLOCK_RENDERER;
 
 /* An element's "on"/"off" escape sequences. */
 typedef struct {
@@ -98,6 +107,8 @@ typedef struct MD_ANSI_STYLE {
     const char*  diff_gutter_sep;     /* glyph between gutter and content */
 
     struct fypal_ctx* palette;   /* borrowed palette of the overlay, or NULL */
+    const MD_BLOCK_RENDERER* block_renderers; /* borrowed from the renderer */
+    size_t n_block_renderers;
     void* _palette;              /* opaque palette overlay: saved pairs, strings */
 
     void* _owned;                /* opaque heap-string registry */
@@ -144,6 +155,10 @@ struct fypal_ctx;
  * copied, so call again after the palette changes variant or capabilities.
  * Returns 0, or -1 on allocation failure or without palette support. */
 int md_ansi_style_set_palette(MD_ANSI_STYLE* s, struct fypal_ctx* palette);
+
+/* The block renderer registered for the language @lang of @len bytes, or NULL. */
+const MD_BLOCK_RENDERER* md_ansi_style_block_renderer(const MD_ANSI_STYLE* s,
+                                                      const char* lang, size_t len);
 
 #ifdef __cplusplus
 }

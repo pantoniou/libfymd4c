@@ -47,6 +47,8 @@ struct fymd_renderer {
     struct fyts_ctx *fyts_ctx;
 #endif
     struct fypal_ctx *palette;      /* borrowed; overlaid on style, or NULL */
+    MD_BLOCK_RENDERER *blocks;      /* block renderers; the style borrows them */
+    size_t nblocks;
 
     struct fymd_line_limit_opts limit;
     char *limit_separator;
@@ -461,6 +463,12 @@ fymd_renderer_destroy(struct fymd_renderer *r)
     free((void *) r->cfg.code_theme);
     free((void *) r->cfg.code_marker);
     free(r->limit_separator);
+    {
+        size_t i;
+        for(i = 0; i < r->nblocks; i++)
+            free(r->blocks[i].lang);
+        free(r->blocks);
+    }
     fymd_buf_fini(&r->screen);
     fymd_buf_fini(&r->visible);
     fymd_buf_fini(&r->viewport);
@@ -610,7 +618,9 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
         style->table_border_none = 0;
     else if(r->cfg.table_border == FYMD_TB_NONE)
         style->table_border_none = 1;
-    /* A new theme keeps the palette laid over the old one. */
+    /* A new theme keeps the block renderers and the palette of the old one. */
+    style->block_renderers = r->blocks;
+    style->n_block_renderers = r->nblocks;
     if(r->palette != NULL && md_ansi_style_set_palette(style, r->palette) != 0) {
         md_ansi_style_destroy(style);
         free(theme);
@@ -647,6 +657,51 @@ fymd_renderer_set_palette(struct fymd_renderer *r, struct fypal_ctx *palette)
     fyts_ctx_destroy(r->fyts_ctx);
     r->fyts_ctx = NULL;
 #endif
+    return 0;
+}
+
+int
+fymd_renderer_set_block_renderer(struct fymd_renderer *r, const char *lang,
+                                 fymd_block_render_fn fn, void *userdata)
+{
+    MD_BLOCK_RENDERER *nb;
+    size_t i, len;
+    char *copy;
+
+    if(r == NULL || r->style == NULL || r->stream != NULL || lang == NULL)
+        return -1;
+    len = strlen(lang);
+    /* the renderer keeps at most 63 bytes of an info-string language */
+    if(len == 0 || len >= 64)
+        return -1;
+    for(i = 0; i < r->nblocks; i++)
+        if(strcmp(r->blocks[i].lang, lang) == 0)
+            break;
+    if(fn == NULL) {
+        if(i == r->nblocks)
+            return 0;
+        free(r->blocks[i].lang);
+        r->blocks[i] = r->blocks[--r->nblocks];
+    } else if(i < r->nblocks) {
+        r->blocks[i].fn = fn;
+        r->blocks[i].userdata = userdata;
+    } else {
+        copy = fymd_strdup(lang);
+        if(copy == NULL)
+            return -1;
+        nb = realloc(r->blocks, (r->nblocks + 1) * sizeof(*nb));
+        if(nb == NULL) {
+            free(copy);
+            return -1;
+        }
+        r->blocks = nb;
+        r->blocks[r->nblocks].lang = copy;
+        r->blocks[r->nblocks].fn = fn;
+        r->blocks[r->nblocks].userdata = userdata;
+        r->nblocks++;
+    }
+    r->style->block_renderers = r->blocks;
+    r->style->n_block_renderers = r->nblocks;
     return 0;
 }
 

@@ -194,6 +194,8 @@ struct MD_ANSI_tag {
     /* Fenced-code syntax highlighting via libfyts: when active, the code text is
      * buffered between block enter/leave and handed to fyts on leave. */
     int code_highlight;     /* highlighting the current code block */
+    int code_fyts;          /* libfyts has a grammar for the current block */
+    const MD_BLOCK_RENDERER* code_custom; /* renderer of the current block, or NULL */
     int code_on_pending;    /* code_block.on deferred until the first body
                                byte, so an EMPTY body emits no stray on/off
                                pair (it breaks streamed-vs-one-shot byte
@@ -2570,6 +2572,84 @@ emit_diff_code(MD_ANSI* r)
     return 1;
 }
 
+/* The rows a block renderer emits, collected until it answers. */
+typedef struct {
+    char* data;
+    size_t size;
+    size_t cap;
+    int oom;
+} ANSI_BLOCK_BUF;
+
+static void
+custom_block_emit(void* emit_ctx, const char* data, size_t len)
+{
+    ANSI_BLOCK_BUF* b = (ANSI_BLOCK_BUF*) emit_ctx;
+    size_t cap;
+    char* nd;
+
+    if(b->oom || len == 0)
+        return;
+    if(b->size + len > b->cap) {
+        cap = b->cap ? b->cap : 256;
+        while(cap < b->size + len)
+            cap *= 2;
+        nd = (char*) realloc(b->data, cap);
+        if(nd == NULL) {
+            b->oom = 1;
+            return;
+        }
+        b->data = nd;
+        b->cap = cap;
+    }
+    memcpy(b->data + b->size, data, len);
+    b->size += len;
+}
+
+/* Hand a closed fenced block to its block renderer and lay out the rows it
+ * emits under the current indent. Returns 3 when the renderer drew the block,
+ * or 0 to render it as code. */
+static int
+emit_custom_block(MD_ANSI* r)
+{
+    const MD_BLOCK_RENDERER* br = r->code_custom;
+    ANSI_BLOCK_BUF buf;
+    char lang[sizeof(r->code_lang)];
+    size_t i, start;
+    int width, rc;
+
+    /* A fence that the stream has not closed is not a block yet. */
+    if((r->flags & MD_ANSI_FLAG_STREAM_OPEN_CODE)
+       && r->list_depth == 0 && r->quote_depth == 0)
+        return 0;
+
+    memset(&buf, 0, sizeof(buf));
+    memcpy(lang, r->code_lang, r->code_lang_size);
+    lang[r->code_lang_size] = '\0';
+    width = (r->wrap_cols > 0) ? r->wrap_cols - ansi_indent_width(r) - DOC_MARGIN : 0;
+    if(r->wrap_cols > 0 && width < 1)
+        width = 1;
+    rc = br->fn(br->userdata, lang, r->code_buf ? r->code_buf : "", r->code_size,
+                width, (r->flags & MD_ANSI_FLAG_NO_COLOR) ? FYMD_BF_NO_COLOR : 0,
+                custom_block_emit, &buf);
+    if(rc != 0 || buf.oom) {
+        free(buf.data);
+        return 0;
+    }
+    for(i = 0, start = 0; i <= buf.size; i++) {
+        if(i < buf.size && buf.data[i] != '\n')
+            continue;
+        if(i == buf.size && i == start)
+            break;                       /* trailing newline, no row */
+        render_indent(r);
+        if(i > start)
+            render_verbatim(r, buf.data + start, (MD_SIZE) (i - start));
+        render_newline(r);
+        start = i + 1;
+    }
+    free(buf.data);
+    return 3;
+}
+
 static int
 enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
 {
@@ -2685,6 +2765,8 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             r->code_size = 0;
             r->code_diff = 0;
             r->code_diff_lang[0] = '\0';
+            r->code_fyts = 0;
+            r->code_custom = NULL;
             {
                 const MD_BLOCK_CODE_DETAIL* det = (const MD_BLOCK_CODE_DETAIL*) detail;
                 if(det->lang.text != NULL && det->lang.size > 0) {
@@ -2705,8 +2787,10 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
              * front avoids fyts emitting an "unknown language" diagnostic. */
             if(r->style->code_enabled && r->code_lang_size > 0) {
                 r->code_lang[r->code_lang_size] = '\0';
-                if(fyts_language_supported(r->code_lang))
+                if(fyts_language_supported(r->code_lang)) {
                     r->code_highlight = 1;
+                    r->code_fyts = 1;
+                }
             }
 #endif
             /* A diff block is rendered by emit_diff_code() (never by the fyts
@@ -2714,10 +2798,22 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             if(r->code_diff)
                 r->code_highlight = 1;
 
+            /* A renderer registered for the language draws the block when it
+             * closes, so its text is buffered like highlighted code. A diff is
+             * never handed to one. */
+            if(!r->code_diff)
+                r->code_custom = md_ansi_style_block_renderer(r->style,
+                                        r->code_lang, r->code_lang_size);
+            if(r->code_custom != NULL)
+                r->code_highlight = 1;
+
             /* Header rule (with the language label, when present). In reverse
              * mode the header is deferred to leave, where it is drawn on fyts's
              * frame background together with the code. */
-            if(!(r->code_highlight && !r->code_diff &&
+            /* A block renderer draws no code chrome; the header waits for its
+             * answer. */
+            if(r->code_custom == NULL &&
+               !(r->code_highlight && !r->code_diff &&
                  r->style->code_reverse && !r->card))
                 render_code_rule(r, r->code_lang, r->code_lang_size);
 
@@ -2858,11 +2954,19 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             /* done: 0 = not highlighted / fell back, 1 = code emitted (draw the
              * footer here), 2 = whole block (header+code+footer) already emitted. */
             int done = 0;
-            if(r->code_highlight) {
+            if(r->code_custom != NULL) {
+                done = emit_custom_block(r);
+                r->code_custom = NULL;
+                /* Declined: draw the header that waited. In reverse mode the
+                 * code path draws its own. */
+                if(done == 0 && !(r->style->code_reverse && !r->card))
+                    render_code_rule(r, r->code_lang, r->code_lang_size);
+            }
+            if(done == 0 && r->code_highlight) {
                 if(r->code_diff)
                     done = emit_diff_code(r);
 #ifdef MD4C_WITH_FYTS
-                if(!done)
+                if(!done && (r->code_fyts || r->code_diff))
                     done = emit_highlighted_code(r, 1);
 #endif
                 if(done == 0) {
@@ -2872,17 +2976,18 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                         render_code_rule(r, r->code_lang, r->code_lang_size);
                     emit_plain_code(r);
                 }
-                r->code_highlight = 0;
-            } else {
+            } else if(done == 0) {
                 if(!r->code_on_pending)
                     render_ansi(r, r->style->code_block.off);
                 r->code_on_pending = 0;
             }
+            r->code_highlight = 0;
             if((r->flags & MD_ANSI_FLAG_CODE_META) && r->n_code_blocks < r->code_blocks_cap) {
                 r->code_blocks[r->n_code_blocks].end = r->output_offset;
                 r->n_code_blocks++;
             }
-            if(done != 2) {
+            /* 2: the code path drew the whole block; 3: a block renderer did. */
+            if(done != 2 && done != 3) {
                 /* Streaming: defer a top-level trailing code block's footer so a
                  * still-open fence does not flap its bottom rule on every push.
                  * The footer is flushed on the next enter_block (if another block
