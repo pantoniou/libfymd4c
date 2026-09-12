@@ -52,6 +52,16 @@ int md_ui_region_add(MD_ANSI_UI* ui, const char* id, size_t id_len,
 /* Split a slot marker argument "ID:A:B". Returns 0, or -1 when it is not one. */
 int md_ui_slot_arg(const char* arg, size_t len, size_t* id_len, int* a, int* b);
 
+/* Split a marker argument "[ID:]N1:...:Nn" into @n numbers and the length of
+ * the id (0 without one). Returns 0, or -1 when it is not one. */
+int md_ui_arg_nums(const char* arg, size_t len, size_t* id_len, int* nums, int n);
+
+/* Share @total out to @n parts by @weight, each at least @min (NULL for none),
+ * into @out. A part that its weight would put below its minimum gets the
+ * minimum, and the rest is shared again. The parts add up to @total when the
+ * minimums leave room, by largest remainders. */
+void md_ui_share(int total, const int* weight, const int* min, int n, int* out);
+
 #define MD_UI_ATTR_MAX 6
 
 typedef struct {

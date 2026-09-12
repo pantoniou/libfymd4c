@@ -66,33 +66,123 @@ md_ui_region_add(MD_ANSI_UI* ui, const char* id, size_t id_len, size_t row,
 }
 
 int
-md_ui_slot_arg(const char* arg, size_t len, size_t* id_len, int* a, int* b)
+md_ui_arg_nums(const char* arg, size_t len, size_t* id_len, int* nums, int n)
 {
-    size_t i, sep[2], found = 0;
-    int v[2], k;
+    size_t start, end = len, i;
+    int k;
 
-    if(arg == NULL)
+    if(arg == NULL || n <= 0)
         return -1;
-    /* the id may hold ':', so the numbers are the last two fields */
-    for(i = len; i > 0 && found < 2; i--)
-        if(arg[i - 1] == ':')
-            sep[found++] = i - 1;
-    if(found < 2)
-        return -1;
-    for(k = 0; k < 2; k++) {
-        size_t from = sep[1 - k] + 1, to = k == 0 ? sep[0] : len;
-        if(from >= to)
+    for(k = n - 1; k >= 0; k--) {
+        start = end;
+        while(start > 0 && arg[start - 1] >= '0' && arg[start - 1] <= '9')
+            start--;
+        if(start == end)
             return -1;
-        for(v[k] = 0, i = from; i < to; i++) {
-            if(arg[i] < '0' || arg[i] > '9')
+        for(nums[k] = 0, i = start; i < end; i++)
+            if(nums[k] < 1000000)
+                nums[k] = nums[k] * 10 + (arg[i] - '0');
+        if(k > 0) {
+            if(start == 0 || arg[start - 1] != ':')
                 return -1;
-            v[k] = v[k] * 10 + (arg[i] - '0');
+            end = start - 1;
+        } else {
+            end = start;
         }
     }
-    *id_len = sep[1];
-    *a = v[0];
-    *b = v[1];
+    if(end == 0) {
+        *id_len = 0;
+        return 0;
+    }
+    if(arg[end - 1] != ':')
+        return -1;
+    *id_len = end - 1;
     return 0;
+}
+
+int
+md_ui_slot_arg(const char* arg, size_t len, size_t* id_len, int* a, int* b)
+{
+    int nums[2];
+
+    if(md_ui_arg_nums(arg, len, id_len, nums, 2) != 0 || *id_len == 0)
+        return -1;
+    *a = nums[0];
+    *b = nums[1];
+    return 0;
+}
+
+void
+md_ui_share(int total, const int* weight, const int* min, int n, int* out)
+{
+    char pinned[64];
+    long rest, w, base, rem, best_rem;
+    int i, best, changed, left;
+
+    if(n <= 0)
+        return;
+    if(n > (int) sizeof(pinned))
+        n = (int) sizeof(pinned);
+    memset(pinned, 0, sizeof(pinned));
+    for(i = 0; i < n; i++)
+        out[i] = 0;
+    for(;;) {
+        rest = total;
+        w = 0;
+        for(i = 0; i < n; i++) {
+            if(pinned[i])
+                rest -= out[i];
+            else
+                w += weight[i] > 0 ? weight[i] : 0;
+        }
+        if(rest < 0)
+            rest = 0;
+        changed = 0;
+        for(i = 0; i < n && min != NULL; i++) {
+            if(pinned[i])
+                continue;
+            base = w > 0 ? rest * (weight[i] > 0 ? weight[i] : 0) / w : 0;
+            if(base < min[i]) {
+                out[i] = min[i];
+                pinned[i] = 1;
+                changed = 1;
+            }
+        }
+        if(changed)
+            continue;
+        if(w == 0)
+            return;
+        /* largest remainders: the parts add up to what is left */
+        left = (int) rest;
+        for(i = 0; i < n; i++) {
+            if(pinned[i])
+                continue;
+            out[i] = (int)(rest * (weight[i] > 0 ? weight[i] : 0) / w);
+            left -= out[i];
+        }
+        while(left > 0) {
+            best = -1;
+            best_rem = -1;
+            for(i = 0; i < n; i++) {
+                if(pinned[i] || weight[i] <= 0)
+                    continue;
+                rem = rest * weight[i] % w;
+                if(rem > best_rem) {
+                    best_rem = rem;
+                    best = i;
+                }
+            }
+            if(best < 0)
+                break;
+            out[best]++;
+            pinned[best] = 2;   /* one extra row at most */
+            left--;
+        }
+        for(i = 0; i < n; i++)
+            if(pinned[i] == 2)
+                pinned[i] = 0;
+        return;
+    }
 }
 
 static int
@@ -279,6 +369,8 @@ typedef struct {
     int slot_col;
     int slot_width;
     size_t slot_row;    /* the first output row of its blank rows */
+    int weight;         /* ROW_VFILL: its share of the rows left over */
+    int min;            /* ROW_VFILL: the rows it keeps */
 } UI_ROW;
 
 enum { ROW_CONTENT, ROW_VFILL, ROW_SCROLL, ROW_END };
@@ -288,7 +380,7 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
                char** out, size_t* out_len)
 {
     UI_ROW* rows = NULL;
-    size_t nrows = 0, arows = 0, i, j, k, content = 0, nvfill = 0, extra, over;
+    size_t nrows = 0, arows = 0, i, j, k, content = 0, nvfill = 0, minsum = 0, over;
     size_t* map = NULL;
     size_t pos, mlen, kl, al, body, take, o, newrow;
     const char* kind;
@@ -315,16 +407,26 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
         rows[nrows].keep = 1;
         mlen = md_ui_marker(in + pos, end - pos, &kind, &kl, &arg, &al);
         if(mlen != 0 && mlen == end - pos) {
+            int nums[4];
+            size_t idl;
             if(md_ui_marker_is(kind, kl, "vfill")) {
                 rows[nrows].type = ROW_VFILL;
+                rows[nrows].weight = 1;
+                if(arg != NULL && md_ui_arg_nums(arg, al, &idl, nums, 2) == 0) {
+                    rows[nrows].weight = nums[0];
+                    rows[nrows].min = nums[1];
+                }
                 nvfill++;
             } else if(md_ui_marker_is(kind, kl, "vslot") &&
-                      md_ui_slot_arg(arg, al, &rows[nrows].slot_id_len,
-                                     &rows[nrows].slot_col,
-                                     &rows[nrows].slot_width) == 0) {
+                      md_ui_arg_nums(arg, al, &idl, nums, 4) == 0 && idl > 0) {
                 /* an elastic slot takes its share like a vfill */
                 rows[nrows].type = ROW_VFILL;
                 rows[nrows].slot_id = arg;
+                rows[nrows].slot_id_len = idl;
+                rows[nrows].slot_col = nums[0];
+                rows[nrows].slot_width = nums[1];
+                rows[nrows].weight = nums[2];
+                rows[nrows].min = nums[3];
                 nvfill++;
             } else if(md_ui_marker_is(kind, kl, "scroll")) {
                 rows[nrows].type = ROW_SCROLL;
@@ -340,16 +442,38 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
         pos = end + (nl ? 1 : 0);
     }
 
-    if(height > 0 && content < (size_t) height && nvfill > 0) {
-        extra = (size_t) height - content;
-        for(i = 0, k = 0; i < nrows; i++) {
-            if(rows[i].type != ROW_VFILL)
-                continue;
-            rows[i].pad = extra / nvfill + (k < extra % nvfill ? 1 : 0);
-            k++;
+    /* the minimum rows of the flexible rows are rows the page must hold */
+    for(i = 0; i < nrows; i++)
+        if(rows[i].type == ROW_VFILL)
+            minsum += (size_t) rows[i].min;
+    if(height > 0 && nvfill > 0 && content + minsum <= (size_t) height) {
+        int* w = (int*) malloc(nvfill * sizeof(int));
+        int* mn = (int*) malloc(nvfill * sizeof(int));
+        int* share = (int*) malloc(nvfill * sizeof(int));
+        if(w == NULL || mn == NULL || share == NULL) {
+            free(w);
+            free(mn);
+            free(share);
+            goto err;
         }
-    } else if(height > 0 && content > (size_t) height) {
-        over = content - (size_t) height;
+        for(i = 0, k = 0; i < nrows; i++)
+            if(rows[i].type == ROW_VFILL) {
+                w[k] = rows[i].weight;
+                mn[k] = rows[i].min;
+                k++;
+            }
+        md_ui_share((int)((size_t) height - content), w, mn, (int) nvfill, share);
+        for(i = 0, k = 0; i < nrows; i++)
+            if(rows[i].type == ROW_VFILL)
+                rows[i].pad = (size_t) share[k++];
+        free(w);
+        free(mn);
+        free(share);
+    } else if(height > 0 && content + minsum > (size_t) height) {
+        for(i = 0; i < nrows; i++)
+            if(rows[i].type == ROW_VFILL)
+                rows[i].pad = (size_t) rows[i].min;
+        over = content + minsum - (size_t) height;
         for(i = 0; i < nrows && over > 0; i++) {
             if(rows[i].type != ROW_SCROLL)
                 continue;
@@ -376,7 +500,7 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
     }
 
     map = (size_t*) malloc((nrows ? nrows : 1) * sizeof(*map));
-    buf = (char*) malloc(len + (height > 0 ? (size_t) height : 0) + 1);
+    buf = (char*) malloc(len + (height > 0 ? (size_t) height : 0) + minsum + 1);
     if(map == NULL || buf == NULL)
         goto err;
     for(i = 0, o = 0, newrow = 0; i < nrows; i++) {

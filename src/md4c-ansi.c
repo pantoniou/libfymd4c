@@ -2935,6 +2935,7 @@ ui_marker(MD_ANSI* r, const char* kind, const char* arg, size_t arg_len, int dir
 }
 
 static void ui_slot_inline(MD_ANSI* r, const MD_UI_TAG* t);
+static void ui_size_parse(const char* s, size_t n, int* kind, int* val);
 
 /* An inline fy-* tag: fill, act, role, glyph or slot. */
 static void
@@ -3041,59 +3042,93 @@ ui_col_append(const MD_CHAR* text, MD_SIZE size, void* userdata)
     c->size[j] += size;
 }
 
-/* The column widths of widths="20,*,30%" in @avail columns, @gap between them. */
-static int
-ui_columns_widths(MD_ANSI_COLUMNS* c, const char* spec, size_t len, int avail)
+/* A size: "N" columns (kind 0), "N%" of the width (1), or "*" and "N*", a
+ * weighted share of the rest (2). */
+static void
+ui_size_parse(const char* s, size_t n, int* kind, int* val)
 {
-    int kind[MD_UI_COLS_MAX], val[MD_UI_COLS_MAX];
-    int n = 0, used, stars = 0, rest, j, k = 0;
+    size_t i = 0;
+
+    while(i < n && s[i] == ' ')
+        i++;
+    while(n > i && s[n - 1] == ' ')
+        n--;
+    *kind = 0;
+    *val = 0;
+    for(; i < n && s[i] >= '0' && s[i] <= '9'; i++)
+        if(*val < 100000)
+            *val = *val * 10 + (s[i] - '0');
+    if(i < n && s[i] == '*') {
+        *kind = 2;
+        if(*val == 0)
+            *val = 1;
+    } else if(i < n && s[i] == '%') {
+        *kind = 1;
+    }
+}
+
+/*
+ * The column widths of widths="20,30%,2*,*" in @avail columns with @gap
+ * between them. min="8" is the least width of each column that is not fixed;
+ * min="0,8,4" gives each column its own.
+ */
+static int
+ui_columns_widths(MD_ANSI_COLUMNS* c, const char* spec, size_t len,
+                  const char* mins, size_t mins_len, int avail)
+{
+    int kind[MD_UI_COLS_MAX] = {0}, val[MD_UI_COLS_MAX] = {0};
+    int mn[MD_UI_COLS_MAX] = {0}, w[MD_UI_COLS_MAX] = {0};
+    int wmin[MD_UI_COLS_MAX] = {0}, share[MD_UI_COLS_MAX] = {0};
+    int idx[MD_UI_COLS_MAX] = {0};
+    int n = 0, nmin = 0, used, rest, j, k, nw;
     size_t i = 0, start;
 
     while(i <= len && n < MD_UI_COLS_MAX) {
         start = i;
         while(i < len && spec[i] != ',')
             i++;
-        while(start < i && spec[start] == ' ')
-            start++;
-        kind[n] = 0;
-        val[n] = 0;
-        if(start < i && spec[start] == '*') {
-            kind[n] = 2;
-            stars++;
-        } else {
-            while(start < i && spec[start] >= '0' && spec[start] <= '9')
-                val[n] = val[n] * 10 + (spec[start++] - '0');
-            if(start < i && spec[start] == '%')
-                kind[n] = 1;
-        }
+        ui_size_parse(spec + start, i - start, &kind[n], &val[n]);
         n++;
         i++;
     }
+    for(i = 0; mins != NULL && i <= mins_len && nmin < MD_UI_COLS_MAX; i++) {
+        start = i;
+        while(i < mins_len && mins[i] != ',')
+            i++;
+        ui_size_parse(mins + start, i - start, &k, &mn[nmin]);
+        nmin++;
+    }
     if(n == 0)
         return -1;
+    for(j = 0; j < n; j++)
+        if(nmin == 0)
+            mn[j] = 0;
+        else if(nmin == 1)
+            mn[j] = mn[0];
+        else if(j >= nmin)
+            mn[j] = 0;
     avail -= c->gap * (n - 1);
     if(avail < n)
         avail = n;
-    for(j = 0, used = 0; j < n; j++) {
-        if(kind[j] == 1)
-            c->width[j] = avail * val[j] / 100;
-        else if(kind[j] == 0)
-            c->width[j] = val[j];
-        else
+    for(j = 0, used = 0, nw = 0; j < n; j++) {
+        if(kind[j] == 2) {
+            idx[nw] = j;
+            w[nw] = val[j];
+            wmin[nw] = mn[j];
+            nw++;
             continue;
+        }
+        c->width[j] = kind[j] == 1 ? avail * val[j] / 100 : val[j];
+        if(kind[j] == 1 && c->width[j] < mn[j])
+            c->width[j] = mn[j];
         if(c->width[j] < 1)
             c->width[j] = 1;
         used += c->width[j];
     }
     rest = avail - used;
-    for(j = 0; j < n; j++) {
-        if(kind[j] != 2)
-            continue;
-        c->width[j] = rest > 0 ? rest / stars + (k < rest % stars ? 1 : 0) : 1;
-        if(c->width[j] < 1)
-            c->width[j] = 1;
-        k++;
-    }
+    md_ui_share(rest > 0 ? rest : 0, w, wmin, nw, share);
+    for(k = 0; k < nw; k++)
+        c->width[idx[k]] = share[k] > 0 ? share[k] : 1;
     c->n = n;
     return 0;
 }
@@ -3350,12 +3385,13 @@ ui_slot_attrs(const MD_UI_TAG* t, const char* dim, char* id, size_t id_size,
     *value = -1;
     *star = 0;
     v = md_ui_tag_attr(t, dim, &vl);
-    if(v != NULL && vl == 1 && v[0] == '*') {
-        *star = 1;
-    } else if(v != NULL) {
-        for(*value = 0; vl > 0 && *v >= '0' && *v <= '9'; v++, vl--)
-            if(*value < 100000)
-                *value = *value * 10 + (*v - '0');
+    if(v != NULL) {
+        int kind, val;
+        ui_size_parse(v, vl, &kind, &val);
+        if(kind == 2)
+            *star = val;        /* the weight of an elastic size */
+        else
+            *value = val;
     }
     return 0;
 }
@@ -3441,13 +3477,29 @@ ui_slot_block(MD_ANSI* r, const MD_UI_TAG* t)
 
     if(star) {
         if((r->flags & MD_ANSI_FLAG_UI_ROWS) && !r->ui_col_depth) {
-            n = snprintf(arg, sizeof(arg), "%s:%d:%d", id, indent, width);
+            const char* mv;
+            size_t ml;
+            int mk, min = 0;
+            mv = md_ui_tag_attr(t, "min", &ml);
+            if(mv != NULL)
+                ui_size_parse(mv, ml, &mk, &min);
+            n = snprintf(arg, sizeof(arg), "%s:%d:%d:%d:%d", id, indent, width,
+                         star, min);
             if(n > 0 && (size_t) n < sizeof(arg))
                 ui_row_marker(r, "vslot", arg, (size_t) n);
             r->need_newline = 1;
             return;
         }
-        height = 1;     /* no page to take rows from: one row */
+        /* no page to take rows from: its least rows, or one */
+        {
+            const char* mv;
+            size_t ml;
+            int mk, min = 0;
+            mv = md_ui_tag_attr(t, "min", &ml);
+            if(mv != NULL)
+                ui_size_parse(mv, ml, &mk, &min);
+            height = min > 0 ? min : 1;
+        }
     }
 
     content = ui_slot_content(r, id, width, height > 0 ? height : 0, &clen);
@@ -3520,8 +3572,12 @@ ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
                 v = "*,*";
                 vl = 3;
             }
-            if(ui_columns_widths(r->ui_cols, v, vl, avail) != 0)
-                ui_columns_free(r);
+            {
+                size_t ml = 0;
+                const char* m = md_ui_tag_attr(&t, "min", &ml);
+                if(ui_columns_widths(r->ui_cols, v, vl, m, ml, avail) != 0)
+                    ui_columns_free(r);
+            }
         } else if(md_ui_tag_is(&t, "columns") && t.closing) {
             if(r->ui_cols == NULL)
                 goto next;
@@ -3538,7 +3594,16 @@ ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
             if(r->ui_cols != NULL && r->ui_cols->capturing)
                 ui_column_end(r);
         } else if(md_ui_tag_is(&t, "vfill") && !t.closing) {
-            ui_row_marker(r, "vfill", NULL, 0);
+            char arg[32];
+            int weight = 1, min = 0, n;
+            v = md_ui_tag_attr(&t, "weight", &vl);
+            if(v != NULL)
+                ui_size_parse(v, vl, &n, &weight);
+            v = md_ui_tag_attr(&t, "min", &vl);
+            if(v != NULL)
+                ui_size_parse(v, vl, &n, &min);
+            n = snprintf(arg, sizeof(arg), "%d:%d", weight, min);
+            ui_row_marker(r, "vfill", arg, (size_t) n);
         } else if(md_ui_tag_is(&t, "scroll")) {
             if(t.closing) {
                 ui_row_marker(r, "/scroll", NULL, 0);
