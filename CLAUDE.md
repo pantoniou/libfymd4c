@@ -84,6 +84,15 @@ internal type. Stateless conversions (`libfymd4c-convert.h`) don't take a
 renderer: `fymd_render_html(md, len, parser_flags, FYMD_HTML_*, &out, &olen)`
 and `fymd_heal(md, len, &out, &olen)` (results freed with `fymd_free`).
 
+UI Markdown (`FYMD_RF_UI`) lives in `src/md4c-ui.c` and the `ui_*` functions of
+`src/md4c-ansi.c`. An inline `fy-*` tag becomes a zero-width APC marker
+(`ESC _ fy:kind[=arg] ESC \\`) in the line buffer. A fill is resolved where a
+row or a table cell gets its width; `out_sink()` ends every other marker at the
+real sink, where the row and column are exact, and records the regions there.
+Output that a column or an indent captures keeps its markers. The vertical
+layout (`md_ui_vertical()`) runs in `fymd_render_()` over row markers. Test it
+with `test/ui-api-test.c` and look at it with `fymd4c/fymd-ui`.
+
 libfyaml is an explicit public dependency: the cfg's `style_generic` field takes
 an already-parsed `fy_generic` mapping (highest precedence over `style_path` /
 `style`), so the public header includes `<libfyaml/libfyaml-generic.h>` and the

@@ -173,6 +173,77 @@ fymd_render_reset(r);                   /* drop stream state to start another */
 fymd_renderer_destroy(r);
 ```
 
+### UI Markdown
+
+A render with `FYMD_RF_UI` reads a small set of `fy-*` tags. The tags let an
+application draw chrome in Markdown: rows with text at both ends, labels that
+the user can click, text in a palette role, blocks side by side, and a page
+with a header and a footer. The tags are raw HTML, so a render without the flag
+and any other Markdown viewer show nothing for them.
+
+```markdown
+## Work<fy-fill/><fy-role name="chrome">3 files</fy-role>
+
+* <fy-act id="open:foo.c">foo.c</fy-act><fy-fill/>+10, -2
+```
+
+Inline tags:
+
+| tag | effect |
+|---|---|
+| `<fy-fill/>` | Flexible blank space. The columns that a row leaves over go to its fills, in equal shares, so one fill right-aligns the text after it and two fills center the text between them. In a table cell the fill takes the padding of the cell. A row without room gives a fill no columns. |
+| `<fy-act id="ID">label</fy-act>` | A clickable label, styled by the `action` pair or the `md.action` role. The id holds letters, digits and `_-.:/`, 1 to 63 bytes; a tag with another id is ignored. |
+| `<fy-role name="ROLE">text</fy-role>` | Text in a role of the palette. Without a palette, or without the role, the text is plain. |
+| `<fy-glyph name="NAME" fallback="TEXT"/>` | A glyph of the palette, in the form that `FYMD_PF_ASCII` selects, else the fallback text. |
+
+Block tags, each on a line of its own, with a blank line before the Markdown
+that they hold:
+
+```markdown
+<fy-columns widths="20,*,30%" gap="2">
+<fy-col>
+
+Left column.
+
+</fy-col>
+<fy-col>
+
+| test | result |
+|---|---|
+
+</fy-col>
+</fy-columns>
+```
+
+| tag | effect |
+|---|---|
+| `<fy-columns widths="..." gap="N">` | Blocks side by side. Each width is a number of columns, a percentage of the width, or `*` for an equal share of the rest. The gap defaults to 2 columns and the widths to `*,*`. Each `<fy-col>` renders at the width of its column, tables included, and the columns are joined row by row. A stream renders the whole column block at one time. |
+| `<fy-vfill/>` | Flexible blank rows: the rows that the page leaves over. |
+| `<fy-scroll anchor="top\|bottom">` ... `</fy-scroll>` | A body that gives up rows when the page is too tall: the first rows for `bottom`, the last rows for `top`. |
+
+The vertical tags need a page height:
+`fymd_renderer_set_height(r, rows)`. Without a height, and in a stream, they do
+nothing. A page taller than its scroll bodies can take stays taller than the
+height.
+
+After `fymd_render()` or `fymd_render_with_margins()`,
+`fymd_renderer_get_regions()` lists the clickable regions, and
+`fymd_renderer_region_at(r, row, col)` returns the id at a cell. A region has
+the row and the columns of the output, after wrapping, columns and the vertical
+layout. A label that wraps has one region for each row. A render with a line
+limit reports no regions.
+
+Give model output the flag only when the model may draw such chrome: with the
+flag, a response can place labels and layout like the application does.
+
+`fymd-ui` (built with the command line utility, not installed) renders a UI
+Markdown file, or a built-in demo, and prints its regions and the region at a
+cell:
+
+```sh
+fymd-ui --width=60 --height=24 --regions --click=23,55 [--palette=ember] [FILE]
+```
+
 ### Raw fenced blocks
 
 Raw text can use the fenced-code presentation and syntax-highlighting pipeline
@@ -255,6 +326,7 @@ one-shot and progressive language rendering.
 | `FYMD_RF_NO_DIFF_HL`   | Do not highlight diff content as the patched file's language |
 | `FYMD_RF_CODE_MARKER`  | Switch the styling's fenced first-row marker on for this render |
 | `FYMD_RF_NO_CODE_MARKER` | ... or off                                      |
+| `FYMD_RF_UI`           | UI Markdown: act on the `fy-*` tags (see [UI Markdown](#ui-markdown)) |
 
 `FYMD_RF_DEFAULT` is `FYMD_RF_HEAL`. `fymd_renderer_get_cfg()` returns the
 renderer's owned copy of the cfg; `fymd_detect_width()` resolves the auto width;
