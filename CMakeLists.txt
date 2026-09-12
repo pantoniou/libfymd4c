@@ -242,6 +242,21 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(block-renderer-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME block-renderer-api COMMAND block-renderer-api-test)
 
+        add_executable(ui-api-test test/ui-api-test.c)
+        target_link_libraries(ui-api-test PRIVATE libfymd4c::libfymd4c)
+        if(MD4C_WITH_FYPALETTE)
+            target_link_libraries(ui-api-test PRIVATE libfypalette::libfypalette)
+            target_compile_definitions(ui-api-test PRIVATE FYMD_TEST_PALETTE)
+        endif()
+        add_test(NAME ui-api COMMAND ui-api-test)
+
+        # The demo reports a region for each of its clickable labels.
+        add_test(NAME ui-demo
+            COMMAND "$<TARGET_FILE:fymd-ui>" --color=off --width=60 --height=24
+                    --regions)
+        set_tests_properties(ui-demo PROPERTIES
+            PASS_REGULAR_EXPRESSION "region cmd:quit row=2[0-9]")
+
         if(MD4C_WITH_FYPALETTE)
             add_executable(palette-api-test test/palette-api-test.c)
             target_link_libraries(palette-api-test PRIVATE
