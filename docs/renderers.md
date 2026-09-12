@@ -195,6 +195,7 @@ Inline tags:
 | `<fy-act id="ID">label</fy-act>` | A clickable label, styled by the `action` pair or the `md.action` role. The id holds letters, digits and `_-.:/`, 1 to 63 bytes; a tag with another id is ignored. |
 | `<fy-role name="ROLE">text</fy-role>` | Text in a role of the palette. Without a palette, or without the role, the text is plain. |
 | `<fy-glyph name="NAME" fallback="TEXT"/>` | A glyph of the palette, in the form that `FYMD_PF_ASCII` selects, else the fallback text. |
+| `<fy-slot id="ID" width="N"/>` | N cells that another component draws (see [Slots](#slots)). The cells do not break across rows. |
 
 Block tags, each on a line of its own, with a blank line before the Markdown
 that they hold:
@@ -220,6 +221,7 @@ Left column.
 | `<fy-columns widths="..." gap="N">` | Blocks side by side. Each width is a number of columns, a percentage of the width, or `*` for an equal share of the rest. The gap defaults to 2 columns and the widths to `*,*`. Each `<fy-col>` renders at the width of its column, tables included, and the columns are joined row by row. A stream renders the whole column block at one time. |
 | `<fy-vfill/>` | Flexible blank rows: the rows that the page leaves over. |
 | `<fy-scroll anchor="top\|bottom">` ... `</fy-scroll>` | A body that gives up rows when the page is too tall: the first rows for `bottom`, the last rows for `top`. |
+| `<fy-slot id="ID" height="N\|*"/>` | Rows that another component draws, at the width of the page or of the column (see [Slots](#slots)). |
 
 The vertical tags need a page height:
 `fymd_renderer_set_height(r, rows)`. Without a height, and in a stream, they do
@@ -235,6 +237,34 @@ limit reports no regions.
 
 Give model output the flag only when the model may draw such chrome: with the
 flag, a response can place labels and layout like the application does.
+
+#### Slots
+
+A slot is a placeholder: the layout gives it a position and a size, and
+another component draws it. An inline slot is `width` cells of a row. A block
+slot is rows at the width that the page, or its column, has at that point; it
+has `height` rows, or the rows that its component draws when it has no height.
+`height="*"` makes the slot elastic: with a page height it takes the rows that
+the page leaves over, like `<fy-vfill/>`.
+
+A component draws a slot in one of two ways:
+
+- **During the render.** `fymd_renderer_set_slot_renderer(r, fn, userdata)`
+  calls `fn` with the id, the width and the height of each slot (0 when the
+  rows of the content decide), and `fn` emits the rows like a block renderer.
+  The rows take part in the layout: they wrap into the slot, move with the
+  vertical layout, and sit in their column. The content is clipped to the
+  slot. To draw Markdown, `fn` renders with a renderer of its own; the calling
+  renderer rejects a render while it renders. The regions of that inner render
+  are in its own coordinates: add the row and column of the slot region to
+  place them on the page.
+- **After the render.** The region of the slot (`kind` is
+  `FYMD_REGION_SLOT`) gives its row, column, width and height, and the
+  component draws over those cells, for example a terminal surface. An elastic
+  slot is always drawn this way, because it has its rows only after the
+  vertical layout. An elastic slot that got no rows has a height of 0.
+
+Without a slot renderer, or when it returns -1, the slot is blank.
 
 `fymd-ui` (built with the command line utility, not installed) renders a UI
 Markdown file, or a built-in demo, and prints its regions and the region at a

@@ -90,7 +90,12 @@ UI Markdown (`FYMD_RF_UI`) lives in `src/md4c-ui.c` and the `ui_*` functions of
 row or a table cell gets its width; `out_sink()` ends every other marker at the
 real sink, where the row and column are exact, and records the regions there.
 Output that a column or an indent captures keeps its markers. The vertical
-layout (`md_ui_vertical()`) runs in `fymd_render_()` over row markers. Test it
+layout (`md_ui_vertical()`) runs in `fymd_render_()` over row markers. An
+`fy-slot` is a placeholder that another component draws: the slot renderer
+fills it during the render, or the component draws its region afterwards. A
+slot renderer that renders Markdown uses a renderer of its own, because
+`fymd_render_()` rejects a render on a renderer that is rendering. Each row of a
+block slot carries a marker, so a column does not trim a blank slot row. Test it
 with `test/ui-api-test.c` and look at it with `fymd4c/fymd-ui`.
 
 libfyaml is an explicit public dependency: the cfg's `style_generic` field takes
