@@ -150,7 +150,9 @@ palette defines replaces the glyph of the theme:
 | indicator | `tool.pending` and its frames `tool.pending.1` to `.7`, `tool.ok`, `tool.fail` |
 
 The `gutter.cols` parameter of the palette sets the document margin: the columns
-before the text and after it. `fymd_renderer_set_palette_flags()` with
+before the text and after it. The `md.code.rules` parameter set to `0` draws a
+fenced block, a diff block included, without its rule rows above and below; the
+blank rows around the block still set it apart. `fymd_renderer_set_palette_flags()` with
 `FYMD_PF_ASCII` takes the ASCII form of each glyph, for a terminal without the
 UTF-8 forms. `fymd_renderer_set_palette()` takes the UTF-8 forms.
 
