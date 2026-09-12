@@ -695,6 +695,165 @@ test_weights(void)
     fymd_renderer_destroy(r);
 }
 
+/* The natural rows of @md: a render without a page height. */
+static int
+natural_rows(struct fymd_renderer *r, const char *md)
+{
+    char *out;
+    int n;
+
+    fymd_renderer_set_height(r, 0);
+    out = render(r, md);
+    n = rows(out);
+    fymd_free(out);
+    return n;
+}
+
+static void
+test_drop(void)
+{
+    const struct fymd_region *rg;
+    struct fymd_renderer *r;
+    char *out;
+    int n;
+    static const char page[] =
+        "<fy-drop order=\"2\">\n\nheader\n\n</fy-drop>\n\n"
+        "body\n\n"
+        "<fy-drop order=\"1\">\n\n<fy-act id=\"status\">status</fy-act>\n\n"
+        "</fy-drop>\n\n"
+        "prompt\n";
+    static const char ties[] =
+        "<fy-drop>\n\nfirst\n\n</fy-drop>\n\n"
+        "<fy-drop>\n\nsecond\n\n</fy-drop>\n\nkeep\n";
+    static const char scroll[] =
+        "head\n\n<fy-scroll anchor=\"bottom\">\n\n* one\n* two\n\n"
+        "</fy-scroll>\n\n<fy-drop>\n\nstatus\n\n</fy-drop>\n\nfoot\n";
+    static const char order[] =
+        "<fy-drop order=\"abc\">\n\nxxx\n\n</fy-drop>\n\n"
+        "<fy-drop order=\"1\">\n\nyyy\n\n</fy-drop>\n\nzzz\n";
+
+    r = renderer(1, 40, 0);
+
+    /* a page that fits keeps every body, and the tags draw nothing */
+    n = natural_rows(r, page);
+    fymd_renderer_set_height(r, n);
+    out = render(r, page);
+    CHECK(out != NULL && strstr(out, "header") && strstr(out, "body") &&
+          strstr(out, "status") && strstr(out, "prompt"));
+    CHECK(region_find(r, "status") != NULL);
+    CHECK(out != NULL && !strstr(out, "fy-drop"));
+    fymd_free(out);
+
+    /* one row short: the lowest order goes, and its region with it */
+    fymd_renderer_set_height(r, n - 1);
+    out = render(r, page);
+    CHECK(out != NULL && strstr(out, "header") && !strstr(out, "status") &&
+          strstr(out, "body") && strstr(out, "prompt"));
+    CHECK(region_find(r, "status") == NULL);
+    CHECK(rows(out) <= n - 1);
+    if(out == NULL || strstr(out, "status") || !strstr(out, "header"))
+        dump("drop the lowest order", out);
+    fymd_free(out);
+
+    /* shorter still: the next order goes too; what has no drop stays */
+    fymd_renderer_set_height(r, 2);
+    out = render(r, page);
+    CHECK(out != NULL && !strstr(out, "header") && !strstr(out, "status") &&
+          strstr(out, "body") && strstr(out, "prompt"));
+    if(out == NULL || strstr(out, "header"))
+        dump("drop both orders", out);
+    fymd_free(out);
+
+    /* equal orders: the later body goes first */
+    n = natural_rows(r, ties);
+    fymd_renderer_set_height(r, n - 1);
+    out = render(r, ties);
+    CHECK(out != NULL && strstr(out, "first") && !strstr(out, "second") &&
+          strstr(out, "keep"));
+    if(out == NULL || !strstr(out, "first") || strstr(out, "second"))
+        dump("drop ties", out);
+    fymd_free(out);
+
+    /* a drop goes before a scroll body gives up a row */
+    n = natural_rows(r, scroll);
+    fymd_renderer_set_height(r, n - 1);
+    out = render(r, scroll);
+    CHECK(out != NULL && strstr(out, "one") && strstr(out, "two") &&
+          !strstr(out, "status") && strstr(out, "foot"));
+    if(out == NULL || !strstr(out, "one") || strstr(out, "status"))
+        dump("drop before scroll", out);
+    fymd_free(out);
+
+    /* an elastic slot in a dropped body gets no rows and frees its minimum */
+    fymd_renderer_set_height(r, 2);
+    out = render(r, "<fy-drop>\n\n<fy-slot id=\"s\" height=\"*\" min=\"3\"/>\n\n"
+                    "</fy-drop>\n\nkeep\n");
+    rg = region_find(r, "s");
+    CHECK(rg != NULL && rg->height == 0);
+    CHECK(out != NULL && strstr(out, "keep") && rows(out) <= 2);
+    if(rg == NULL || rg->height != 0 || rows(out) > 2)
+        dump("drop an elastic slot", out);
+    fymd_free(out);
+
+    /* a dropped elastic slot frees its minimum: the next order stays */
+    fymd_renderer_set_height(r, natural_rows(r, "<fy-drop order=\"2\">\n\n"
+                                            "header\n\n</fy-drop>\n\nkeep\n"));
+    out = render(r, "<fy-drop order=\"1\">\n\n"
+                    "<fy-slot id=\"s\" height=\"*\" min=\"5\"/>\n\n"
+                    "</fy-drop>\n\n<fy-drop order=\"2\">\n\nheader\n\n"
+                    "</fy-drop>\n\nkeep\n");
+    CHECK(out != NULL && strstr(out, "header") && strstr(out, "keep"));
+    if(out == NULL || !strstr(out, "header"))
+        dump("drop frees a minimum", out);
+    fymd_free(out);
+
+    /* a scroll body counts only the rows a drop left in it, so the rows
+     * still over come from the next scroll body */
+    fymd_renderer_set_height(r, 4);
+    out = render(r, "<fy-scroll anchor=\"bottom\">\n\n<fy-drop>\n\nd1\n\n"
+                    "d2\n\nd3\n\n</fy-drop>\n\n* a1\n\n</fy-scroll>\n\n"
+                    "<fy-scroll anchor=\"bottom\">\n\n* b1\n* b2\n* b3\n"
+                    "* b4\n\n</fy-scroll>\n\nfoot\n");
+    CHECK(out != NULL && rows(out) <= 4 && !strstr(out, "d1") &&
+          !strstr(out, "b2") && strstr(out, "b4") && strstr(out, "foot"));
+    if(out == NULL || rows(out) > 4 || strstr(out, "b2"))
+        dump("scroll after a drop", out);
+    fymd_free(out);
+
+    /* an order that is not a number is order 0 */
+    n = natural_rows(r, order);
+    fymd_renderer_set_height(r, n - 1);
+    out = render(r, order);
+    CHECK(out != NULL && !strstr(out, "xxx") && strstr(out, "yyy") &&
+          strstr(out, "zzz"));
+    fymd_free(out);
+
+    /* an unclosed drop is not a body: nothing of it goes */
+    fymd_renderer_set_height(r, 1);
+    out = render(r, "<fy-drop>\n\nlost\n\nkeep\n");
+    CHECK(out != NULL && strstr(out, "lost") && strstr(out, "keep"));
+    fymd_free(out);
+
+    /* a close without an open is ignored */
+    out = render(r, "aaa\n\n</fy-drop>\n\nbbb\n");
+    CHECK(out != NULL && strstr(out, "aaa") && strstr(out, "bbb"));
+    fymd_free(out);
+
+    /* no page height: nothing is dropped */
+    fymd_renderer_set_height(r, 0);
+    out = render(r, page);
+    CHECK(out != NULL && strstr(out, "header") && strstr(out, "status"));
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+
+    /* without UI Markdown the bodies are plain Markdown */
+    r = renderer(0, 40, 2);
+    out = render(r, page);
+    CHECK(out != NULL && strstr(out, "header") && strstr(out, "status"));
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+}
+
 int
 main(void)
 {
@@ -706,6 +865,7 @@ main(void)
     test_vertical();
     test_slots();
     test_weights();
+    test_drop();
 #ifdef FYMD_TEST_PALETTE
     test_palette();
 #endif
