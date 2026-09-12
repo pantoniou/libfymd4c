@@ -42,6 +42,15 @@ link libfyts' **static** target — `libfyts::fyts_static` (installed) or
 grammars are absorbed into the shared libfymd4c. `MD4C_FYTS_CATALOGUE`
 (minimal/default/full) selects the grammars, and applies to `fetch` mode only.
 
+**Block renderers** (`fymd_renderer_set_block_renderer()`) let a consumer draw
+a fenced block by language; libfymermaid depends on libfymd4c, so a diagram
+reaches a document only this way. The renderer table travels on
+`MD_ANSI_STYLE`, like the palette. The call is made in `emit_custom_block()`
+when a fenced block of a Markdown document closes: never for a diff, never for
+the raw fenced API, and never for a fence still open in a stream. It is not
+progressive, so `lang_progressive_unsafe()` treats a registered language as
+unsafe and the stream commits no interior line of such a block.
+
 **libfypalette** is optional (`MD4C_FYPALETTE` = `auto`/`on`/`off`). With it,
 `fymd_renderer_set_palette()` overlays the style pairs with palette roles
 (`md_ansi_style_set_palette()` in `md4c-style.c`, which keeps the theme pairs so

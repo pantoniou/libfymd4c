@@ -51,6 +51,43 @@ internally) can hand it straight to the renderer without re-serializing to text.
 The generic is only read (all strings are copied), so the caller may free its
 builder immediately after `fymd_renderer_create()`.
 
+### Block renderers
+
+A fenced block of a Markdown document can be drawn by the application instead
+of as code. Register a renderer for the language of its info string:
+
+```c
+static int draw(void *userdata, const char *lang, const char *text, size_t len,
+                int width, enum fymd_block_flags flags,
+                fymd_block_emit_fn emit, void *emit_ctx)
+{
+    /* draw text[0..len) in at most `width` columns (0 is unlimited) */
+    emit(emit_ctx, rows, rows_len);   /* rows separated by '\n' */
+    return 0;                         /* or -1: render the block as code */
+}
+
+fymd_renderer_set_block_renderer(r, "mermaid", draw, userdata);
+```
+
+The renderer lays out each emitted row under the indent of the block, with no
+code rule above or below it. A renderer that returns -1 declines: its output is
+discarded and the block renders as code, header and all. `FYMD_BF_NO_COLOR`
+says that the render has no colour.
+
+A block renderer is not progressive. It is called once, for a closed fence of
+a Markdown document, and never for:
+
+- a diff or patch block, which keeps its own rendering;
+- `fymd_render_fenced()`, which has no Markdown document; or
+- a fence that a progressive stream has not closed yet. The stream renders it
+  as code, commits none of its interior lines, and draws it when it closes, so
+  the streamed output stays identical to the one-shot render.
+
+The language matches exactly and has 1 to 63 bytes. A later registration for the
+language replaces the renderer; a NULL function removes it.
+`fymd_renderer_set_theme()` keeps the renderers. The call is rejected while a
+progressive stream exists.
+
 ### Palette styling
 
 When libfymd4c is built with libfypalette, a renderer can take its colours
