@@ -499,8 +499,11 @@ out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
             out_sink_raw(r, text + start, i - start);
         }
         if(md_ui_marker_is(kind, kl, "fill")) {
-            ui_track(r, " ", 1);
-            out_sink_raw(r, " ", 1);
+            /* a fill that no layout resolved is one cell */
+            const char* g = (arg != NULL && al > 0) ? arg : " ";
+            MD_SIZE gl = (arg != NULL && al > 0) ? (MD_SIZE) al : 1;
+            ui_track(r, g, gl);
+            out_sink_raw(r, g, gl);
         } else if(md_ui_marker_is(kind, kl, "act")) {
             r->ui_act = 1;
             r->ui_act_len = al < sizeof(r->ui_act_id) ? al : sizeof(r->ui_act_id) - 1;
@@ -741,9 +744,14 @@ ui_emit_filled(MD_ANSI* r, const char* buf, MD_SIZE size, int extra, int direct)
         }
         pad = extra / n + (k < extra % n ? 1 : 0);
         k++;
-        for(j = 0; j < pad; j++) {
-            if(direct) out_direct(r, " ", 1);
-            else render_verbatim(r, " ", 1);
+        {
+            /* the glyph of the fill, a blank without one */
+            const char* g = (arg != NULL && al > 0) ? arg : " ";
+            MD_SIZE gl = (arg != NULL && al > 0) ? (MD_SIZE) al : 1;
+            for(j = 0; j < pad; j++) {
+                if(direct) out_direct(r, g, gl);
+                else render_verbatim(r, g, gl);
+            }
         }
         i += m - 1;
         start = i + 1;
@@ -2953,8 +2961,19 @@ ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
     if(md_ui_tag_parse(text, size, &t) != 0)
         return;
     if(md_ui_tag_is(&t, "fill")) {
-        if(!t.closing)
-            ui_marker(r, "fill", NULL, 0, 0);
+        if(t.closing)
+            return;
+        /* char="X": the fill is drawn with one glyph of one column */
+        v = md_ui_tag_attr(&t, "char", &vl);
+        if(v != NULL && vl > 0 && vl <= 4 && memchr(v, 0x1b, vl) == NULL) {
+            unsigned cp;
+            MD_SIZE cl = ansi_utf8_decode(v, (MD_SIZE) vl, &cp);
+            if(cl == vl && fymd_cp_width(cp) == 1 && cp != '\\') {
+                ui_marker(r, "fill", v, vl, 0);
+                return;
+            }
+        }
+        ui_marker(r, "fill", NULL, 0, 0);
     } else if(md_ui_tag_is(&t, "act")) {
         if(t.closing) {
             ui_marker(r, "/act", NULL, 0, 0);

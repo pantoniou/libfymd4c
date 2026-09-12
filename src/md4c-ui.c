@@ -447,9 +447,9 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
         if(rows[i].type == ROW_VFILL)
             minsum += (size_t) rows[i].min;
     if(height > 0 && nvfill > 0 && content + minsum <= (size_t) height) {
-        int* w = (int*) malloc(nvfill * sizeof(int));
-        int* mn = (int*) malloc(nvfill * sizeof(int));
-        int* share = (int*) malloc(nvfill * sizeof(int));
+        int* w = (int*) calloc(nvfill, sizeof(int));
+        int* mn = (int*) calloc(nvfill, sizeof(int));
+        int* share = (int*) calloc(nvfill, sizeof(int));
         if(w == NULL || mn == NULL || share == NULL) {
             free(w);
             free(mn);
