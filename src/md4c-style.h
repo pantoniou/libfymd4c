@@ -32,6 +32,7 @@ typedef enum {
  * and freed by md_ansi_style_destroy(). */
 typedef struct MD_ANSI_STYLE {
     MD_STYLE_PAIR heading;
+    MD_STYLE_PAIR heading_level[6]; /* per level 1-6; a NULL .on uses heading */
     MD_STYLE_PAIR strong;
     MD_STYLE_PAIR emphasis;
     MD_STYLE_PAIR underline;

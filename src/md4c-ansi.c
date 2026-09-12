@@ -141,6 +141,7 @@ struct MD_ANSI_tag {
     int image_nesting_level;
     int quote_depth;
     int list_depth;
+    unsigned heading_level; /* level of the open heading, 1-6; 0 outside one */
     int in_code_block;
     int code_footer_pending; /* streaming: trailing code-block footer deferred */
     int need_newline;       /* pending newline before next block */
@@ -248,6 +249,16 @@ ansi_capture_append(const MD_CHAR* text, MD_SIZE size, void* userdata)
 }
 
 static int ansi_disp_width(const char* buf, MD_SIZE size);
+
+/* The pair of the open heading: its level's pair when the style has one. */
+static const MD_STYLE_PAIR*
+heading_pair(const MD_ANSI* r)
+{
+    if(r->heading_level >= 1 && r->heading_level <= 6 &&
+       r->style->heading_level[r->heading_level - 1].on != NULL)
+        return &r->style->heading_level[r->heading_level - 1];
+    return &r->style->heading;
+}
 static TLINE* wrap_text(const char* buf, MD_SIZE size, int width, int* n_out);
 static void render_indent(MD_ANSI* r);
 
@@ -2656,7 +2667,8 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 r->need_newline = 0;
             }
             render_indent(r);
-            render_ansi(r, r->style->heading.on);
+            r->heading_level = ((MD_BLOCK_H_DETAIL*) detail)->level;
+            render_ansi(r, heading_pair(r)->on);
             break;
 
         case MD_BLOCK_CODE:
@@ -2836,7 +2848,8 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             break;
 
         case MD_BLOCK_H:
-            render_ansi(r, r->style->heading.off);
+            render_ansi(r, heading_pair(r)->off);
+            r->heading_level = 0;
             render_newline(r);
             r->need_newline = 1;
             break;

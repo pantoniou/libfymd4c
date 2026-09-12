@@ -98,6 +98,26 @@ load_pair(STRREG* reg, fy_generic styles, fy_generic elements, const char* name,
     out->off = resolve_style(reg, styles, roff);
 }
 
+/* Per-level heading pairs, from the elements heading1 to heading6. A level
+ * that the config does not name keeps a NULL pair and uses the heading pair. */
+static void
+load_heading_levels(MD_ANSI_STYLE* s, STRREG* reg, fy_generic styles,
+                    fy_generic elements, int light)
+{
+    char name[16];
+    int i;
+
+    for(i = 0; i < 6; i++) {
+        snprintf(name, sizeof(name), "heading%d", i + 1);
+        s->heading_level[i].on = NULL;
+        s->heading_level[i].off = NULL;
+        if(!fy_generic_is_valid(fy_get(elements, name, fy_invalid)))
+            continue;
+        load_pair(reg, styles, elements, name, s->heading.on, s->heading.off,
+                  light, &s->heading_level[i]);
+    }
+}
+
 static const char*
 load_str(STRREG* reg, fy_generic map, const char* key, const char* dflt)
 {
@@ -186,6 +206,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
 #define LP(name, don, doff, field) \
     load_pair(reg, styles, elements, (name), (don), (doff), light, &s->field)
     LP("heading",       "\033[1;35m", "\033[0m",  heading);
+    load_heading_levels(s, reg, styles, elements, light);
     LP("strong",        "\033[1m",    "\033[22m", strong);
     LP("emphasis",      "\033[3m",    "\033[23m", emphasis);
     LP("underline",     "\033[4m",    "\033[24m", underline);
@@ -412,6 +433,12 @@ static const struct {
     int exact;
 } palette_pairs[] = {
     { offsetof(MD_ANSI_STYLE, heading),           "md.heading",          0 },
+    { offsetof(MD_ANSI_STYLE, heading_level[0]),  "md.heading.1",        0 },
+    { offsetof(MD_ANSI_STYLE, heading_level[1]),  "md.heading.2",        0 },
+    { offsetof(MD_ANSI_STYLE, heading_level[2]),  "md.heading.3",        0 },
+    { offsetof(MD_ANSI_STYLE, heading_level[3]),  "md.heading.4",        0 },
+    { offsetof(MD_ANSI_STYLE, heading_level[4]),  "md.heading.5",        0 },
+    { offsetof(MD_ANSI_STYLE, heading_level[5]),  "md.heading.6",        0 },
     { offsetof(MD_ANSI_STYLE, strong),            "md.strong",           0 },
     { offsetof(MD_ANSI_STYLE, emphasis),          "md.emphasis",         0 },
     { offsetof(MD_ANSI_STYLE, underline),         "md.underline",        0 },
