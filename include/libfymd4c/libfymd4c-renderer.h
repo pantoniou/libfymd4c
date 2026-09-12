@@ -80,7 +80,8 @@ enum fymd_cfg_flags {
                                            language of the patched file */
     FYMD_RF_CODE_MARKER  = FYMD_BIT(9), /* switch the styling's fenced-block
                                            first-row marker on for this render */
-    FYMD_RF_NO_CODE_MARKER = FYMD_BIT(10) /* ... or off, whatever it configures */
+    FYMD_RF_NO_CODE_MARKER = FYMD_BIT(10), /* ... or off, whatever it configures */
+    FYMD_RF_UI           = FYMD_BIT(11) /* UI Markdown: act on the fy-* tags */
 };
 
 /* Sensible default flags: heal the in-progress tail. */
@@ -312,6 +313,56 @@ int fymd_render(struct fymd_renderer *r, const char *md, size_t len,
 int fymd_render_with_margins(struct fymd_renderer *r,
         const char *md, size_t len, fymd_margin_fn margin_fn,
         void *margin_userdata, char **out, size_t *out_len) FYMD_EXPORT;
+
+/* UI Markdown.
+ *
+ * A render with FYMD_RF_UI acts on these tags, which are raw HTML elsewhere
+ * and render as nothing without the flag:
+ *
+ *   <fy-fill/>                   flexible blank space: the columns a row or a
+ *                                table cell leaves over go to its fills
+ *   <fy-act id="ID">label</fy-act>
+ *                                a clickable label; its rows and columns are
+ *                                reported as regions
+ *   <fy-role name="ROLE">text</fy-role>
+ *                                text in a palette role
+ *   <fy-glyph name="NAME" fallback="TEXT"/>
+ *                                a palette glyph, or the fallback text
+ *
+ * and, each on a line of its own:
+ *
+ *   <fy-columns widths="20,*,30%" gap="2"> <fy-col> ... </fy-col> ... </fy-columns>
+ *                                blocks side by side
+ *   <fy-vfill/>                  flexible blank rows, with a height
+ *   <fy-scroll anchor="top|bottom"> ... </fy-scroll>
+ *                                a body that gives up rows, with a height
+ *
+ * Give model output the flag only when the model may draw such chrome. */
+
+/* A clickable region of the last one-shot render: the rows and columns of the
+ * label of an fy-act. A label that wraps has one region for each row. */
+struct fymd_region {
+    const char *id;
+    size_t row;
+    int col;
+    int width;
+};
+
+/* Lay out a FYMD_RF_UI render in @rows rows: the rows left over go to the
+ * fy-vfill rows, and an fy-scroll body gives up the rows that do not fit, from
+ * the end away from its anchor. 0 turns the vertical layout off. A stream does
+ * not take the vertical layout. Returns 0, or -1 for a negative @rows. */
+int fymd_renderer_set_height(struct fymd_renderer *r, int rows) FYMD_EXPORT;
+
+/* The regions of the last fymd_render() or fymd_render_with_margins(), in
+ * output order. The array and its ids are valid until the next call on the
+ * renderer. A render with a line limit reports no regions. Returns 0 / -1. */
+int fymd_renderer_get_regions(struct fymd_renderer *r,
+        const struct fymd_region **regions, size_t *count) FYMD_EXPORT;
+
+/* The id of the region at @row and @col of the last render, or NULL. */
+const char *fymd_renderer_region_at(struct fymd_renderer *r, size_t row,
+        int col) FYMD_EXPORT;
 
 /* Measure the terminal rows produced by a one-shot render. This uses the
  * renderer's Markdown layout, width, styling, and rendered-row limit. */

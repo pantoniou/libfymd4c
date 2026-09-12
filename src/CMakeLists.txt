@@ -108,6 +108,7 @@ set(_fymd4c_sources
     md4c-html.c md4c-html.h
     md4c-heal.c md4c-heal.h md4c-heal-wrap.h
     md4c-ansi.c md4c-ansi.h
+    md4c-ui.c md4c-ui.h
     md4c-style.c md4c-style.h
     md4c-stream.c md4c-stream.h
     md4c-inline.c

@@ -68,6 +68,11 @@ extern "C"
  * once the render reaches the terminal's bottom row). The footer is drawn only
  * at finish, when the block is truly closed. */
 #define MD_ANSI_FLAG_STREAM_OPEN_CODE 0x1000
+/* UI Markdown: act on the fy-* tags (layout, clickable regions, roles and
+ * glyphs). Without it the tags are raw HTML and render as nothing. */
+#define MD_ANSI_FLAG_UI 0x2000
+/* Keep the vfill and scroll row markers in the output for md_ui_vertical(). */
+#define MD_ANSI_FLAG_UI_ROWS 0x4000
 
 /* Presentation flags for md_ansi_fenced_styled(). */
 #define MD_ANSI_FENCE_STYLE     0x01
@@ -145,6 +150,16 @@ extern "C"
                           int width, const struct MD_ANSI_STYLE *style,
                           MD_ANSI_MARGIN_FN margin_fn, void *margin_userdata,
                           struct fyts_ctx **fyts_ctx, size_t *output_rows);
+    /* As md_ansi_ex_styled_margins_ctx(), collecting the clickable regions of
+     * a MD_ANSI_FLAG_UI render into @ui (NULL collects none). */
+    struct MD_ANSI_UI;
+    int md_ansi_ex_styled_ui(const MD_CHAR *input, MD_SIZE input_size,
+                          void (*process_output)(const MD_CHAR *, MD_SIZE, void *),
+                          void *userdata, unsigned parser_flags, unsigned renderer_flags,
+                          int width, const struct MD_ANSI_STYLE *style,
+                          MD_ANSI_MARGIN_FN margin_fn, void *margin_userdata,
+                          struct fyts_ctx **fyts_ctx, size_t *output_rows,
+                          struct MD_ANSI_UI *ui);
 
     /* Render raw text through the fenced-code pipeline without Markdown
      * parsing. STYLE enables the existing rules/margin/plain-code styling;

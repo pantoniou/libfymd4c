@@ -24,6 +24,8 @@
 #include <fyts/fyts.h>
 #endif
 
+#include "md4c-ui.h"
+
 #ifndef FYMD_VERSION_STRING
 #define FYMD_VERSION_STRING "0.0.0"
 #endif
@@ -57,6 +59,11 @@ struct fymd_renderer {
     struct fymd_buf visible;        /* viewport returned by the previous push */
     struct fymd_buf viewport;       /* projection scratch / finish result */
     size_t stream_active_rows;      /* mutable rows in the underlying stream */
+
+    MD_ANSI_UI ui;                  /* regions of the last one-shot render */
+    struct fymd_region *regions;    /* public view of ui.regions */
+    size_t regions_alloc;
+    int height;                     /* rows of the vertical UI layout, or 0 */
 };
 
 static int fymd_buf_finish(struct fymd_buf *b, char **out, size_t *out_len);
@@ -432,6 +439,7 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     if(cfg->flags & FYMD_RF_TABLE_FIT) rf |= MD_ANSI_FLAG_TABLE_FIT_CONTENT;
     if(cfg->flags & FYMD_RF_HEAL)      rf |= MD_ANSI_FLAG_HEAL;
     if(cfg->flags & FYMD_RF_REVERSE)   rf |= MD_ANSI_FLAG_REVERSE;
+    if(cfg->flags & FYMD_RF_UI)        rf |= MD_ANSI_FLAG_UI;
     if(cfg->sgr_input == FYMD_SGR_KEEP) rf |= MD_ANSI_FLAG_SGR_KEEP;
     else if(cfg->sgr_input == FYMD_SGR_SAFE) rf |= MD_ANSI_FLAG_SGR_SAFE;
     r->renderer_flags = rf;
@@ -473,6 +481,8 @@ fymd_renderer_destroy(struct fymd_renderer *r)
     fymd_buf_fini(&r->screen);
     fymd_buf_fini(&r->visible);
     fymd_buf_fini(&r->viewport);
+    md_ui_fini(&r->ui);
+    free(r->regions);
     free(r);
 }
 
@@ -771,26 +781,50 @@ fymd_render_(struct fymd_renderer *r, const char *md, size_t len,
              char **out, size_t *out_len)
 {
     struct fymd_buf b;
-    int rc;
+    unsigned rf;
+    int ui, rc;
 
     if(r == NULL || out == NULL)
         return -1;
 
+    rf = r->renderer_flags;
+    ui = (rf & MD_ANSI_FLAG_UI) != 0;
+    if(ui && r->height > 0)
+        rf |= MD_ANSI_FLAG_UI_ROWS;
+    md_ui_reset(&r->ui);
     memset(&b, 0, sizeof(b));
-    rc = md_ansi_ex_styled_margins_ctx(md, (MD_SIZE) len, fymd_buf_append, &b,
-                           r->parser_flags, r->renderer_flags, r->width, r->style,
+    rc = md_ansi_ex_styled_ui(md, (MD_SIZE) len, fymd_buf_append, &b,
+                           r->parser_flags, rf, r->width, r->style,
                            margin_fn, margin_userdata,
 #ifdef MD4C_WITH_FYTS
                            &r->fyts_ctx,
 #else
                            NULL,
 #endif
-                           NULL);
+                           NULL, ui ? &r->ui : NULL);
     if(rc != 0 || b.oom) {
         free(b.data);
+        md_ui_reset(&r->ui);
         return -1;
     }
+    if(rf & MD_ANSI_FLAG_UI_ROWS) {
+        char *laid;
+        size_t laid_len;
+
+        if(md_ui_vertical(b.data ? b.data : "", b.size, r->height, &r->ui,
+                          &laid, &laid_len) != 0) {
+            free(b.data);
+            md_ui_reset(&r->ui);
+            return -1;
+        }
+        free(b.data);
+        b.data = laid;
+        b.size = laid_len;
+        b.asize = laid_len + 1;
+    }
     if(r->limit.mode != FYMD_LLM_NONE && r->limit.max_lines > 0) {
+        /* the viewport moves rows: the regions no longer name them */
+        md_ui_reset(&r->ui);
         struct fymd_buf limited;
         memset(&limited, 0, sizeof(limited));
         if(fymd_project(r, b.data, b.size, &limited) != 0) {
@@ -813,6 +847,57 @@ fymd_render_(struct fymd_renderer *r, const char *md, size_t len,
     if(out_len != NULL)
         *out_len = b.size;
     return 0;
+}
+
+int
+fymd_renderer_set_height(struct fymd_renderer *r, int rows)
+{
+    if(r == NULL || rows < 0)
+        return -1;
+    r->height = rows;
+    return 0;
+}
+
+int
+fymd_renderer_get_regions(struct fymd_renderer *r,
+        const struct fymd_region **regions, size_t *count)
+{
+    struct fymd_region *nr;
+    size_t i;
+
+    if(r == NULL || regions == NULL || count == NULL)
+        return -1;
+    if(r->ui.count > r->regions_alloc) {
+        nr = realloc(r->regions, r->ui.count * sizeof(*nr));
+        if(nr == NULL)
+            return -1;
+        r->regions = nr;
+        r->regions_alloc = r->ui.count;
+    }
+    for(i = 0; i < r->ui.count; i++) {
+        r->regions[i].id = r->ui.regions[i].id;
+        r->regions[i].row = r->ui.regions[i].row;
+        r->regions[i].col = r->ui.regions[i].col;
+        r->regions[i].width = r->ui.regions[i].width;
+    }
+    *regions = r->regions;
+    *count = r->ui.count;
+    return 0;
+}
+
+const char *
+fymd_renderer_region_at(struct fymd_renderer *r, size_t row, int col)
+{
+    size_t i;
+
+    if(r == NULL)
+        return NULL;
+    for(i = 0; i < r->ui.count; i++) {
+        const MD_ANSI_REGION *rg = &r->ui.regions[i];
+        if(rg->row == row && col >= rg->col && col < rg->col + rg->width)
+            return rg->id;
+    }
+    return NULL;
 }
 
 int

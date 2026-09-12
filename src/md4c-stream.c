@@ -549,6 +549,7 @@ next_sync_offset(const MD_ANSI_STYLE* style, const char* data, size_t size,
     char fence_ch = 0;
     int fence_markup = 0;
     int in_html = 0, html_type = 0;
+    int ui_depth = 0;           /* open fy-columns blocks */
 
     while(i <= size) {
         if(i == size || data[i] == '\n') {
@@ -585,6 +586,12 @@ next_sync_offset(const MD_ANSI_STYLE* style, const char* data, size_t size,
                 fence_markup = lang_progressive_unsafe(style, line + j, ls);
             } else {
                 int t = html_block_start_type(line + k, llen - k);
+                /* Columns lay out their blocks side by side, so a column
+                 * block renders as a whole: no sync point inside it. */
+                if(ci_prefix(line + k, llen - k, "<fy-columns"))
+                    ui_depth++;
+                else if(ci_prefix(line + k, llen - k, "</fy-columns") && ui_depth > 0)
+                    ui_depth--;
                 if(t) {
                     /* Enter the block unless it also ends on this same line. */
                     if(!html_block_ends(line, llen, t)) { in_html = 1; html_type = t; }
@@ -597,7 +604,7 @@ next_sync_offset(const MD_ANSI_STYLE* style, const char* data, size_t size,
                         if(c != ' ' && c != '\t' && c != '\r') { blank = 0; break; }
                         b++;
                     }
-                    if(blank) {
+                    if(blank && ui_depth == 0) {
                         size_t nxt = i + 1;
                         if(nxt < size && data[nxt] != ' ' && data[nxt] != '\t' && data[nxt] != '\n') {
                             const char* nl = (const char*) memchr(data + nxt, '\n', size - nxt);

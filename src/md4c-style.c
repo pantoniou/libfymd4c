@@ -214,6 +214,7 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     LP("code",          "\033[36m",   "\033[39m", code);
     LP("math",          "\033[33m",   "\033[39m", math);
     LP("link",          "\033[4;34m", "\033[0m",  link);
+    LP("action",        "\033[4m",    "\033[24m", action);
     LP("link_url",      "\033[2;34m", "\033[0m",  link_url);
     LP("wikilink",      "\033[4;34m", "\033[0m",  wikilink);
     LP("blockquote",    "\033[2m",    "\033[22m", blockquote);
@@ -450,6 +451,7 @@ static const struct {
     { offsetof(MD_ANSI_STYLE, code),              "md.code",             0 },
     { offsetof(MD_ANSI_STYLE, math),              "md.math",             0 },
     { offsetof(MD_ANSI_STYLE, link),              "md.link",             0 },
+    { offsetof(MD_ANSI_STYLE, action),            "md.action",           0 },
     { offsetof(MD_ANSI_STYLE, link_url),          "md.link.url",         0 },
     { offsetof(MD_ANSI_STYLE, wikilink),          "md.link.wiki",        0 },
     { offsetof(MD_ANSI_STYLE, blockquote),        "md.quote.bar",        0 },
@@ -536,6 +538,7 @@ palette_overlay_remove(MD_ANSI_STYLE* s)
            sizeof(ov->saved_frames));
     s->indicator_pending_frame_count = ov->saved_frame_count;
     s->doc_margin = ov->saved_doc_margin;
+    s->palette_ascii = 0;
     reg_free(&ov->reg);
     free(ov);
     s->_palette = NULL;
@@ -617,6 +620,7 @@ md_ansi_style_set_palette_glyphs(MD_ANSI_STYLE* s, struct fypal_ctx* palette,
            sizeof(ov->saved_frames));
     ov->saved_frame_count = s->indicator_pending_frame_count;
     palette_frames(s, ov, palette, ascii);
+    s->palette_ascii = ascii != 0;
     ov->saved_doc_margin = s->doc_margin;
     if(fypal_ctx_param(palette, "gutter.cols", &cols) == 0 &&
        cols >= 0 && cols <= PALETTE_MARGIN_MAX)

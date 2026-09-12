@@ -49,6 +49,7 @@ typedef struct MD_ANSI_STYLE {
     MD_STYLE_PAIR code;          /* inline code */
     MD_STYLE_PAIR math;
     MD_STYLE_PAIR link;
+    MD_STYLE_PAIR action;        /* UI Markdown: the label of a fy-act */
     MD_STYLE_PAIR link_url;
     MD_STYLE_PAIR wikilink;
     MD_STYLE_PAIR blockquote;    /* quote bar styling */
@@ -111,6 +112,7 @@ typedef struct MD_ANSI_STYLE {
     const char*  diff_gutter_sep;     /* glyph between gutter and content */
 
     struct fypal_ctx* palette;   /* borrowed palette of the overlay, or NULL */
+    int palette_ascii;           /* the overlay took the ASCII glyph forms */
     const MD_BLOCK_RENDERER* block_renderers; /* borrowed from the renderer */
     size_t n_block_renderers;
     void* _palette;              /* opaque palette overlay: saved pairs, strings */

@@ -49,7 +49,12 @@
 #include "md4c-ansi.h"
 #include "md4c-heal-wrap.h"
 #include "md4c-style.h"
+#include "md4c-ui.h"
 #include "entity.h"
+
+#ifdef MD4C_WITH_FYPALETTE
+    #include <libfypalette.h>
+#endif
 
 #ifdef MD4C_WITH_FYTS
     #include <fyts/fyts.h>
@@ -88,7 +93,7 @@
 
 /* Document margin reserved on each side of every line (like glow). The style
  * sets it; a palette takes it from its gutter. */
-#define DOC_MARGIN          (r->style->doc_margin)
+#define DOC_MARGIN          ((r)->ui_col_depth ? 0 : (r)->style->doc_margin)
 
 
 /* Code block metadata entry (heap-allocated when MD_ANSI_FLAG_CODE_META is set) */
@@ -135,6 +140,32 @@ typedef struct MD_ANSI_TABLE {
 } MD_ANSI_TABLE;
 
 typedef struct MD_ANSI_tag MD_ANSI;
+/* An open fy-columns block: the widths and the output of each column. */
+#define MD_UI_COLS_MAX 8
+typedef struct MD_ANSI_COLUMNS {
+    int n;
+    int cur;
+    int gap;
+    int capturing;
+    int width[MD_UI_COLS_MAX];
+    char* buf[MD_UI_COLS_MAX];
+    MD_SIZE size[MD_UI_COLS_MAX];
+    MD_SIZE cap[MD_UI_COLS_MAX];
+    /* the render state a capturing column replaces */
+    void (*saved_out)(const MD_CHAR*, MD_SIZE, void*);
+    void* saved_ud;
+    int saved_wrap;
+    int saved_table_width;
+    int saved_quote;
+    int saved_list;
+    int saved_need_newline;
+    size_t saved_row;
+    int saved_row_open;
+    MD_ANSI_MARGIN_FN saved_margin;
+} MD_ANSI_COLUMNS;
+
+#define MD_UI_ROLE_MAX 8
+
 struct MD_ANSI_tag {
     void (*process_output)(const MD_CHAR*, MD_SIZE, void*);
     void* userdata;
@@ -221,6 +252,21 @@ struct MD_ANSI_tag {
     char* card_buf;                 /* current line being accumulated */
     MD_SIZE card_size, card_cap;
     const char* table_row_on;       /* active complete-row style to replay on reset */
+
+    /* UI Markdown (MD_ANSI_FLAG_UI) */
+    MD_ANSI_UI* ui;                 /* region sink, or NULL */
+    int ui_col;                     /* display column of the current output row */
+    int ui_act;                     /* inside an fy-act */
+    int ui_act_seg;                 /* column the open region starts at, or -1 */
+    char ui_act_id[64];
+    size_t ui_act_len;
+    const char* ui_role_off[MD_UI_ROLE_MAX];
+    int ui_role_depth;
+    int in_html_block;
+    char* html_buf;                 /* the text of the open HTML block */
+    MD_SIZE html_size, html_cap;
+    int ui_col_depth;               /* inside a capturing fy-col */
+    MD_ANSI_COLUMNS* ui_cols;       /* the open fy-columns, or NULL */
 };
 
 
@@ -252,6 +298,8 @@ ansi_capture_append(const MD_CHAR* text, MD_SIZE size, void* userdata)
 }
 
 static int ansi_disp_width(const char* buf, MD_SIZE size);
+static MD_SIZE ansi_esc_len(const char* s, MD_SIZE n);
+static MD_SIZE ansi_utf8_decode(const char* s, MD_SIZE n, unsigned* cp);
 
 /* The pair of the open heading: its level's pair when the style has one. */
 static const MD_STYLE_PAIR*
@@ -363,7 +411,7 @@ card_feed(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 }
 
 static void
-out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+out_sink_raw(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
     MD_SIZE i;
 
@@ -384,6 +432,95 @@ out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
         card_feed(r, text, size);
     else
         r->process_output(text, size, r->userdata);
+}
+
+/* Track the output column of @text and the regions of an open fy-act. */
+static void
+ui_track(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+{
+    size_t row = r->output_row;
+    MD_SIZE i = 0, e, cl;
+    unsigned cp;
+
+    while(i < size) {
+        if(text[i] == '\n') {
+            if(r->ui_act && r->ui_act_seg >= 0 && r->ui_col > r->ui_act_seg)
+                (void) md_ui_region_add(r->ui, r->ui_act_id, r->ui_act_len, row,
+                                        r->ui_act_seg, r->ui_col - r->ui_act_seg);
+            if(r->ui_act)
+                r->ui_act_seg = -1;     /* a wrapped label reopens on the next row */
+            r->ui_col = 0;
+            row++;
+            i++;
+            continue;
+        }
+        e = ansi_esc_len(text + i, size - i);
+        if(e > 0) {
+            i += e;
+            continue;
+        }
+        cl = ansi_utf8_decode(text + i, size - i, &cp);
+        if(r->ui_act && r->ui_act_seg < 0 && cp != ' ')
+            r->ui_act_seg = r->ui_col;
+        r->ui_col += fymd_cp_width(cp);
+        i += cl ? cl : 1;
+    }
+}
+
+/*
+ * Every byte of the document reaches the real sink through here. In a UI
+ * render the layout markers end here: a fill that no layout resolved becomes a
+ * space, an fy-act records its region, and a row marker stays only for the
+ * vertical pass. Output that a column or an indent captures keeps its markers
+ * until it reaches the real sink.
+ */
+static void
+out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+{
+    const char* kind;
+    const char* arg;
+    size_t kl, al;
+    MD_SIZE i, start, m;
+
+    if(!(r->flags & MD_ANSI_FLAG_UI) || size == 0 ||
+       (r->process_output != NULL && r->process_output != r->real_output)) {
+        out_sink_raw(r, text, size);
+        return;
+    }
+    for(i = 0, start = 0; i < size; ) {
+        if((unsigned char) text[i] != 0x1b ||
+           (m = (MD_SIZE) md_ui_marker(text + i, size - i, &kind, &kl, &arg, &al)) == 0) {
+            i++;
+            continue;
+        }
+        if(i > start) {
+            ui_track(r, text + start, i - start);
+            out_sink_raw(r, text + start, i - start);
+        }
+        if(md_ui_marker_is(kind, kl, "fill")) {
+            ui_track(r, " ", 1);
+            out_sink_raw(r, " ", 1);
+        } else if(md_ui_marker_is(kind, kl, "act")) {
+            r->ui_act = 1;
+            r->ui_act_len = al < sizeof(r->ui_act_id) ? al : sizeof(r->ui_act_id) - 1;
+            memcpy(r->ui_act_id, arg, r->ui_act_len);
+            r->ui_act_seg = -1;
+        } else if(md_ui_marker_is(kind, kl, "/act")) {
+            if(r->ui_act && r->ui_act_seg >= 0 && r->ui_col > r->ui_act_seg)
+                (void) md_ui_region_add(r->ui, r->ui_act_id, r->ui_act_len,
+                                        r->output_row, r->ui_act_seg,
+                                        r->ui_col - r->ui_act_seg);
+            r->ui_act = 0;
+        } else if(r->flags & MD_ANSI_FLAG_UI_ROWS) {
+            out_sink_raw(r, text + i, m);   /* a row marker, zero width */
+        }
+        i += m;
+        start = i;
+    }
+    if(start < size) {
+        ui_track(r, text + start, size - start);
+        out_sink_raw(r, text + start, size - start);
+    }
 }
 
 /* Write bytes straight to the output callback (bypassing the line buffer). */
@@ -541,6 +678,71 @@ render_indent(MD_ANSI* r)
     out_direct(r, r->indent_buf, r->indent_len);
 }
 
+/* The number of fill markers in @buf. */
+static int
+ui_fill_count(const char* buf, MD_SIZE size)
+{
+    const char* kind;
+    const char* arg;
+    size_t kl, al, m;
+    MD_SIZE i;
+    int n = 0;
+
+    for(i = 0; i < size; i++) {
+        if((unsigned char) buf[i] != 0x1b)
+            continue;
+        m = md_ui_marker(buf + i, size - i, &kind, &kl, &arg, &al);
+        if(m != 0 && md_ui_marker_is(kind, kl, "fill")) {
+            n++;
+            i += m - 1;
+        }
+    }
+    return n;
+}
+
+/*
+ * Emit @buf with its fills replaced by @extra columns of blanks, shared out
+ * from the first fill. @direct selects out_direct() over render_verbatim().
+ */
+static void render_verbatim(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size);
+
+static void
+ui_emit_filled(MD_ANSI* r, const char* buf, MD_SIZE size, int extra, int direct)
+{
+    const char* kind;
+    const char* arg;
+    size_t kl, al, m;
+    MD_SIZE i, start;
+    int n, k = 0, pad, j;
+
+    n = ui_fill_count(buf, size);
+    if(extra < 0)
+        extra = 0;
+    for(i = 0, start = 0; i < size; i++) {
+        if((unsigned char) buf[i] != 0x1b)
+            continue;
+        m = md_ui_marker(buf + i, size - i, &kind, &kl, &arg, &al);
+        if(m == 0 || !md_ui_marker_is(kind, kl, "fill"))
+            continue;
+        if(i > start) {
+            if(direct) out_direct(r, buf + start, i - start);
+            else render_verbatim(r, buf + start, i - start);
+        }
+        pad = extra / n + (k < extra % n ? 1 : 0);
+        k++;
+        for(j = 0; j < pad; j++) {
+            if(direct) out_direct(r, " ", 1);
+            else render_verbatim(r, " ", 1);
+        }
+        i += m - 1;
+        start = i + 1;
+    }
+    if(start < size) {
+        if(direct) out_direct(r, buf + start, size - start);
+        else render_verbatim(r, buf + start, size - start);
+    }
+}
+
 /* Wrap the collected line content to the available width and emit it. */
 static void
 flush_wrapped(MD_ANSI* r)
@@ -571,8 +773,14 @@ flush_wrapped(MD_ANSI* r)
             if(alen > 0)
                 out_direct(r, active, alen);        /* re-apply the open style */
         }
-        if(lines[k].len > 0)
-            out_direct(r, r->lbuf + lines[k].start, lines[k].len);
+        if(lines[k].len > 0) {
+            if((r->flags & MD_ANSI_FLAG_UI) &&
+               ui_fill_count(r->lbuf + lines[k].start, lines[k].len) > 0)
+                ui_emit_filled(r, r->lbuf + lines[k].start, lines[k].len,
+                               avail - lines[k].w, 1);
+            else
+                out_direct(r, r->lbuf + lines[k].start, lines[k].len);
+        }
     }
     out_direct(r, "\n", 1);
 
@@ -880,6 +1088,14 @@ ansi_esc_len(const char* s, MD_SIZE n)
         i = 2;
         while(i < n) {
             if((unsigned char) s[i] == 0x07) { i++; break; }
+            if((unsigned char) s[i] == 0x1b && i + 1 < n && s[i + 1] == '\\') { i += 2; break; }
+            i++;
+        }
+        return i;
+    }
+    if(n >= 2 && s[1] == '_') {            /* APC: ESC _ ... ESC \ (layout markers) */
+        i = 2;
+        while(i < n) {
             if((unsigned char) s[i] == 0x1b && i + 1 < n && s[i + 1] == '\\') { i += 2; break; }
             i++;
         }
@@ -1302,6 +1518,14 @@ table_emit_slice(MD_ANSI* r, const char* buf, TLINE ln, int width,
     if(align == MD_ALIGN_RIGHT)       { lpad = pad; rpad = 0; }
     else if(align == MD_ALIGN_CENTER) { lpad = pad / 2; rpad = pad - lpad; }
 
+    if((r->flags & MD_ANSI_FLAG_UI) && ln.len > 0 &&
+       ui_fill_count(buf + ln.start, ln.len) > 0) {
+        /* a fill takes the padding of its cell */
+        if(is_header) render_ansi(r, r->style->table_header.on);
+        ui_emit_filled(r, buf + ln.start, ln.len, pad, 0);
+        if(is_header) render_ansi(r, r->style->table_header.off);
+        return;
+    }
     tbl_spaces(r, lpad);
     if(is_header) render_ansi(r, r->style->table_header.on);
     if(ln.len > 0) render_verbatim(r, buf + ln.start, ln.len);
@@ -2660,6 +2884,451 @@ emit_custom_block(MD_ANSI* r)
     return 3;
 }
 
+
+/* ---- UI Markdown tags ---- */
+
+static void
+ui_html_append(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+{
+    MD_SIZE nc;
+    char* p;
+
+    if(r->html_size + size > r->html_cap) {
+        nc = r->html_cap ? r->html_cap * 2 : 256;
+        while(nc < r->html_size + size)
+            nc *= 2;
+        p = (char*) realloc(r->html_buf, nc);
+        if(p == NULL)
+            return;
+        r->html_buf = p;
+        r->html_cap = nc;
+    }
+    memcpy(r->html_buf + r->html_size, text, size);
+    r->html_size += size;
+}
+
+static void
+ui_marker(MD_ANSI* r, const char* kind, const char* arg, size_t arg_len, int direct)
+{
+    char buf[128];
+    int n;
+
+    n = snprintf(buf, sizeof(buf), MD_UI_MARK_OPEN "%s%s%.*s" MD_UI_MARK_CLOSE,
+                 kind, arg ? "=" : "", (int) arg_len, arg ? arg : "");
+    if(n <= 0 || (size_t) n >= sizeof(buf))
+        return;
+    if(direct)
+        out_direct(r, buf, (MD_SIZE) n);
+    else
+        render_verbatim(r, buf, (MD_SIZE) n);
+}
+
+/* An inline fy-* tag: fill, act, role or glyph. */
+static void
+ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+{
+    MD_UI_TAG t;
+    const char* v;
+    size_t vl;
+#ifdef MD4C_WITH_FYPALETTE
+    const struct fypal_role* role;
+    const char* glyph;
+    char name[128];
+#endif
+
+    if(md_ui_tag_parse(text, size, &t) != 0)
+        return;
+    if(md_ui_tag_is(&t, "fill")) {
+        if(!t.closing)
+            ui_marker(r, "fill", NULL, 0, 0);
+    } else if(md_ui_tag_is(&t, "act")) {
+        if(t.closing) {
+            ui_marker(r, "/act", NULL, 0, 0);
+            render_ansi(r, r->style->action.off);
+        } else {
+            v = md_ui_tag_attr(&t, "id", &vl);
+            if(v == NULL || !md_ui_id_valid(v, vl))
+                return;
+            render_ansi(r, r->style->action.on);
+            ui_marker(r, "act", v, vl, 0);
+        }
+    } else if(md_ui_tag_is(&t, "role")) {
+        if(t.closing) {
+            if(r->ui_role_depth > 0) {
+                r->ui_role_depth--;
+                if(r->ui_role_depth < MD_UI_ROLE_MAX &&
+                   r->ui_role_off[r->ui_role_depth] != NULL)
+                    render_ansi(r, r->ui_role_off[r->ui_role_depth]);
+            }
+            return;
+        }
+        if(r->ui_role_depth < MD_UI_ROLE_MAX)
+            r->ui_role_off[r->ui_role_depth] = NULL;
+#ifdef MD4C_WITH_FYPALETTE
+        v = md_ui_tag_attr(&t, "name", &vl);
+        if(v != NULL && vl < sizeof(name) && r->style->palette != NULL &&
+           r->ui_role_depth < MD_UI_ROLE_MAX) {
+            memcpy(name, v, vl);
+            name[vl] = '\0';
+            role = fypal_ctx_role(r->style->palette, name);
+            if(role != NULL) {
+                render_ansi(r, fypal_role_on(r->style->palette, role));
+                r->ui_role_off[r->ui_role_depth] =
+                    fypal_role_off(r->style->palette, role);
+            }
+        }
+#endif
+        r->ui_role_depth++;
+    } else if(md_ui_tag_is(&t, "glyph")) {
+        if(t.closing)
+            return;
+#ifdef MD4C_WITH_FYPALETTE
+        v = md_ui_tag_attr(&t, "name", &vl);
+        if(v != NULL && vl < sizeof(name) && r->style->palette != NULL) {
+            memcpy(name, v, vl);
+            name[vl] = '\0';
+            glyph = fypal_ctx_glyph(r->style->palette, name,
+                                    r->style->palette_ascii != 0);
+            if(glyph != NULL) {
+                RENDER_VERBATIM(r, glyph);
+                return;
+            }
+        }
+#endif
+        v = md_ui_tag_attr(&t, "fallback", &vl);
+        if(v != NULL)
+            render_verbatim(r, v, (MD_SIZE) vl);
+    }
+}
+
+static void
+ui_col_append(const MD_CHAR* text, MD_SIZE size, void* userdata)
+{
+    MD_ANSI_COLUMNS* c = (MD_ANSI_COLUMNS*) userdata;
+    int j = c->cur;
+    MD_SIZE nc;
+    char* p;
+
+    if(size == 0)
+        return;
+    if(c->size[j] + size > c->cap[j]) {
+        nc = c->cap[j] ? c->cap[j] * 2 : 256;
+        while(nc < c->size[j] + size)
+            nc *= 2;
+        p = (char*) realloc(c->buf[j], nc);
+        if(p == NULL)
+            return;
+        c->buf[j] = p;
+        c->cap[j] = nc;
+    }
+    memcpy(c->buf[j] + c->size[j], text, size);
+    c->size[j] += size;
+}
+
+/* The column widths of widths="20,*,30%" in @avail columns, @gap between them. */
+static int
+ui_columns_widths(MD_ANSI_COLUMNS* c, const char* spec, size_t len, int avail)
+{
+    int kind[MD_UI_COLS_MAX], val[MD_UI_COLS_MAX];
+    int n = 0, used, stars = 0, rest, j, k = 0;
+    size_t i = 0, start;
+
+    while(i <= len && n < MD_UI_COLS_MAX) {
+        start = i;
+        while(i < len && spec[i] != ',')
+            i++;
+        while(start < i && spec[start] == ' ')
+            start++;
+        kind[n] = 0;
+        val[n] = 0;
+        if(start < i && spec[start] == '*') {
+            kind[n] = 2;
+            stars++;
+        } else {
+            while(start < i && spec[start] >= '0' && spec[start] <= '9')
+                val[n] = val[n] * 10 + (spec[start++] - '0');
+            if(start < i && spec[start] == '%')
+                kind[n] = 1;
+        }
+        n++;
+        i++;
+    }
+    if(n == 0)
+        return -1;
+    avail -= c->gap * (n - 1);
+    if(avail < n)
+        avail = n;
+    for(j = 0, used = 0; j < n; j++) {
+        if(kind[j] == 1)
+            c->width[j] = avail * val[j] / 100;
+        else if(kind[j] == 0)
+            c->width[j] = val[j];
+        else
+            continue;
+        if(c->width[j] < 1)
+            c->width[j] = 1;
+        used += c->width[j];
+    }
+    rest = avail - used;
+    for(j = 0; j < n; j++) {
+        if(kind[j] != 2)
+            continue;
+        c->width[j] = rest > 0 ? rest / stars + (k < rest % stars ? 1 : 0) : 1;
+        if(c->width[j] < 1)
+            c->width[j] = 1;
+        k++;
+    }
+    c->n = n;
+    return 0;
+}
+
+static void
+ui_column_begin(MD_ANSI* r)
+{
+    MD_ANSI_COLUMNS* c = r->ui_cols;
+
+    if(r->line_open)
+        flush_wrapped(r);
+    c->saved_out = r->process_output;
+    c->saved_ud = r->userdata;
+    c->saved_wrap = r->wrap_cols;
+    c->saved_table_width = r->table_width;
+    c->saved_quote = r->quote_depth;
+    c->saved_list = r->list_depth;
+    c->saved_need_newline = r->need_newline;
+    c->saved_row = r->output_row;
+    c->saved_row_open = r->row_open;
+    c->saved_margin = r->margin_fn;
+    c->size[c->cur] = 0;
+    r->process_output = ui_col_append;
+    r->userdata = c;
+    r->wrap_cols = c->width[c->cur];
+    r->table_width = c->width[c->cur];     /* a table fits its column */
+    r->quote_depth = 0;
+    r->list_depth = 0;
+    r->need_newline = 0;
+    r->margin_fn = NULL;
+    r->ui_col_depth = 1;
+    c->capturing = 1;
+}
+
+static void
+ui_column_end(MD_ANSI* r)
+{
+    MD_ANSI_COLUMNS* c = r->ui_cols;
+
+    if(r->line_open)
+        flush_wrapped(r);
+    r->process_output = c->saved_out;
+    r->userdata = c->saved_ud;
+    r->wrap_cols = c->saved_wrap;
+    r->table_width = c->saved_table_width;
+    r->quote_depth = c->saved_quote;
+    r->list_depth = c->saved_list;
+    r->need_newline = c->saved_need_newline;
+    r->output_row = c->saved_row;
+    r->row_open = c->saved_row_open;
+    r->margin_fn = c->saved_margin;
+    r->ui_col_depth = 0;
+    c->capturing = 0;
+    c->cur++;
+}
+
+/* A row holds text when it has a character that is not a blank. */
+static int
+ui_row_blank(const char* p, MD_SIZE n)
+{
+    MD_SIZE i = 0, e;
+
+    while(i < n) {
+        e = ansi_esc_len(p + i, n - i);
+        if(e > 0) {
+            i += e;
+            continue;
+        }
+        if(p[i] != ' ' && p[i] != '\r')
+            return 0;
+        i++;
+    }
+    return 1;
+}
+
+/* Place the captured columns side by side, row by row. */
+static void
+ui_columns_emit(MD_ANSI* r)
+{
+    MD_ANSI_COLUMNS* c = r->ui_cols;
+    const char* rows_p[MD_UI_COLS_MAX];
+    MD_SIZE rows_n[MD_UI_COLS_MAX], first[MD_UI_COLS_MAX], last[MD_UI_COLS_MAX];
+    int nrows[MD_UI_COLS_MAX];
+    int j, height = 0, k, w, pad;
+    MD_SIZE pos, end, rs;
+    const char* nl;
+
+    /* the rows of each column without its leading and trailing blank rows */
+    for(j = 0; j < c->n; j++) {
+        const char* b = c->buf[j];
+        MD_SIZE size = j < c->cur ? c->size[j] : 0;
+        first[j] = 0;
+        last[j] = 0;
+        nrows[j] = 0;
+        for(pos = 0; pos < size; pos = end + 1) {
+            nl = (const char*) memchr(b + pos, '\n', size - pos);
+            end = nl ? (MD_SIZE)(nl - b) : size;
+            if(ui_row_blank(b + pos, end - pos)) {
+                if(nrows[j] == 0)
+                    first[j] = end + 1;
+                if(!nl)
+                    break;
+                continue;
+            }
+            nrows[j] = 1;
+            last[j] = nl ? end + 1 : end;
+            if(!nl)
+                break;
+        }
+        nrows[j] = 0;
+        for(pos = first[j]; pos < last[j]; pos = end + 1) {
+            nl = (const char*) memchr(b + pos, '\n', last[j] - pos);
+            end = nl ? (MD_SIZE)(nl - b) : last[j];
+            nrows[j]++;
+            if(!nl)
+                break;
+        }
+        rows_p[j] = b;
+        rows_n[j] = first[j];
+        if(nrows[j] > height)
+            height = nrows[j];
+    }
+
+    if(r->need_newline) {
+        render_separator(r);
+        r->need_newline = 0;
+    }
+    for(k = 0; k < height; k++) {
+        render_indent(r);
+        for(j = 0; j < c->n; j++) {
+            if(j > 0)
+                for(pad = 0; pad < c->gap; pad++)
+                    out_direct(r, " ", 1);
+            w = 0;
+            if(k < nrows[j]) {
+                pos = rows_n[j];
+                nl = (const char*) memchr(rows_p[j] + pos, '\n', last[j] - pos);
+                end = nl ? (MD_SIZE)(nl - rows_p[j]) : last[j];
+                rs = end - pos;
+                if(rs > 0) {
+                    out_direct(r, rows_p[j] + pos, rs);
+                    w = ansi_disp_width(rows_p[j] + pos, rs);
+                    if(memchr(rows_p[j] + pos, 0x1b, rs) != NULL &&
+                       !(r->flags & MD_ANSI_FLAG_NO_COLOR))
+                        out_direct(r, "\x1b[0m", 4);
+                }
+                rows_n[j] = end + 1;
+            }
+            if(j + 1 < c->n)
+                for(pad = w; pad < c->width[j]; pad++)
+                    out_direct(r, " ", 1);
+        }
+        out_direct(r, "\n", 1);
+    }
+    r->need_newline = 1;
+}
+
+static void
+ui_columns_free(MD_ANSI* r)
+{
+    int j;
+
+    if(r->ui_cols == NULL)
+        return;
+    for(j = 0; j < MD_UI_COLS_MAX; j++)
+        free(r->ui_cols->buf[j]);
+    free(r->ui_cols);
+    r->ui_cols = NULL;
+}
+
+/* A row marker for the vertical pass: its own row, zero width. */
+static void
+ui_row_marker(MD_ANSI* r, const char* kind, const char* arg, size_t arg_len)
+{
+    if(!(r->flags & MD_ANSI_FLAG_UI_ROWS) || r->ui_col_depth)
+        return;
+    if(r->line_open)
+        flush_wrapped(r);
+    if(r->need_newline) {
+        render_separator(r);
+        r->need_newline = 0;
+    }
+    ui_marker(r, kind, arg, arg_len, 1);
+    out_direct(r, "\n", 1);
+}
+
+/* The fy-* tags of an HTML block: columns, vfill and scroll. */
+static void
+ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
+{
+    MD_UI_TAG t;
+    const char* v;
+    size_t vl;
+    MD_SIZE i;
+    int avail, gap;
+
+    for(i = 0; i < size; i++) {
+        if(text[i] != '<' || md_ui_tag_parse(text + i, size - i, &t) != 0)
+            continue;
+        if(md_ui_tag_is(&t, "columns") && !t.closing) {
+            if(r->ui_cols != NULL || r->ui_col_depth)
+                goto next;
+            r->ui_cols = (MD_ANSI_COLUMNS*) calloc(1, sizeof(*r->ui_cols));
+            if(r->ui_cols == NULL)
+                goto next;
+            gap = 2;
+            v = md_ui_tag_attr(&t, "gap", &vl);
+            if(v != NULL)
+                for(gap = 0; vl > 0 && *v >= '0' && *v <= '9'; v++, vl--)
+                    gap = gap * 10 + (*v - '0');
+            r->ui_cols->gap = gap;
+            avail = (r->wrap_cols > 0 ? r->wrap_cols : 80) -
+                    ansi_indent_width(r) - DOC_MARGIN;
+            v = md_ui_tag_attr(&t, "widths", &vl);
+            if(v == NULL) {
+                v = "*,*";
+                vl = 3;
+            }
+            if(ui_columns_widths(r->ui_cols, v, vl, avail) != 0)
+                ui_columns_free(r);
+        } else if(md_ui_tag_is(&t, "columns") && t.closing) {
+            if(r->ui_cols == NULL)
+                goto next;
+            if(r->ui_cols->capturing)
+                ui_column_end(r);
+            ui_columns_emit(r);
+            ui_columns_free(r);
+        } else if(md_ui_tag_is(&t, "col") && !t.closing) {
+            if(r->ui_cols == NULL || r->ui_cols->capturing ||
+               r->ui_cols->cur >= r->ui_cols->n)
+                goto next;
+            ui_column_begin(r);
+        } else if(md_ui_tag_is(&t, "col") && t.closing) {
+            if(r->ui_cols != NULL && r->ui_cols->capturing)
+                ui_column_end(r);
+        } else if(md_ui_tag_is(&t, "vfill") && !t.closing) {
+            ui_row_marker(r, "vfill", NULL, 0);
+        } else if(md_ui_tag_is(&t, "scroll")) {
+            if(t.closing) {
+                ui_row_marker(r, "/scroll", NULL, 0);
+            } else {
+                v = md_ui_tag_attr(&t, "anchor", &vl);
+                ui_row_marker(r, "scroll", v, v ? vl : 0);
+            }
+        }
+next:
+        if(t.len > 0)
+            i += t.len - 1;
+    }
+}
+
 static int
 enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
 {
@@ -2862,6 +3531,10 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             break;
 
         case MD_BLOCK_HTML:
+            if(r->flags & MD_ANSI_FLAG_UI) {
+                r->in_html_block = 1;
+                r->html_size = 0;
+            }
             break;
 
         case MD_BLOCK_P:
@@ -3015,6 +3688,10 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
         }
 
         case MD_BLOCK_HTML:
+            if(r->in_html_block) {
+                r->in_html_block = 0;
+                ui_block_tags(r, r->html_buf, r->html_size);
+            }
             break;
 
         case MD_BLOCK_P:
@@ -3196,7 +3873,13 @@ text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdat
             break;
 
         case MD_TEXT_HTML:
-            /* Raw HTML: suppress in terminal output */
+            /* Raw HTML renders as nothing; a UI render acts on its fy-* tags. */
+            if(r->flags & MD_ANSI_FLAG_UI) {
+                if(r->in_html_block)
+                    ui_html_append(r, text, size);
+                else
+                    ui_inline_tag(r, text, size);
+            }
             break;
 
         case MD_TEXT_ENTITY:
@@ -3307,6 +3990,21 @@ md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
                   struct fyts_ctx** fyts_ctx,
 		  size_t *output_rows)
 {
+    return md_ansi_ex_styled_ui(input, input_size, process_output, userdata,
+                                parser_flags, renderer_flags, width, style,
+                                margin_fn, margin_userdata, fyts_ctx,
+                                output_rows, NULL);
+}
+
+int
+md_ansi_ex_styled_ui(const MD_CHAR* input, MD_SIZE input_size,
+                  void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
+                  void* userdata, unsigned parser_flags, unsigned renderer_flags,
+                  int width, const struct MD_ANSI_STYLE* style,
+                  MD_ANSI_MARGIN_FN margin_fn, void* margin_userdata,
+                  struct fyts_ctx** fyts_ctx,
+		  size_t *output_rows, struct MD_ANSI_UI* ui)
+{
     MD_ANSI render;
     MD_PARSER parser;
     MD_ANSI_STYLE* owned_style = NULL;
@@ -3319,11 +4017,11 @@ md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
             free(hbuf.data);
             return -1;
         }
-        ret = md_ansi_ex_styled_margins_ctx(hbuf.data, hbuf.size,
+        ret = md_ansi_ex_styled_ui(hbuf.data, hbuf.size,
                                 process_output, userdata,
                                 parser_flags, renderer_flags & ~MD_ANSI_FLAG_HEAL,
                                 width, style, margin_fn, margin_userdata, fyts_ctx,
-				output_rows);
+				output_rows, ui);
         free(hbuf.data);
         return ret;
     }
@@ -3346,6 +4044,8 @@ md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
     render.margin_fn = margin_fn;
     render.margin_userdata = margin_userdata;
     render.fyts_ctx = fyts_ctx;
+    render.ui = ui;
+    render.ui_act_seg = -1;
     if(style == NULL) {
         owned_style = md_ansi_style_create(NULL, 0, NULL);
         if(owned_style == NULL)
@@ -3395,6 +4095,11 @@ md_ansi_ex_styled_margins_ctx(const MD_CHAR* input, MD_SIZE input_size,
         if(output_rows != NULL && ret >= 0)
             *output_rows = render.output_row + (render.row_open ? 1 : 0);
 
+        /* A column left open by the end of the document is dropped. */
+        if(render.ui_cols != NULL && render.ui_cols->capturing)
+            ui_column_end(&render);
+        ui_columns_free(&render);
+        free(render.html_buf);
         free(render.lbuf);
         free(render.code_buf);
         free(render.sgr_buf);
