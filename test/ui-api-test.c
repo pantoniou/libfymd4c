@@ -580,6 +580,105 @@ test_slots(void)
     fymd_renderer_destroy(r);
 }
 
+
+static void
+test_weights(void)
+{
+    const struct fymd_region *a, *b;
+    struct fymd_renderer *r;
+    char buf[256];
+    const char *line;
+    char *out;
+    int n;
+
+    /* weighted columns: 36 columns less a gap of 2 is 34, shared 1:3 */
+    r = renderer(1, 40, 0);
+    out = render(r,
+        "<fy-columns widths=\"*,3*\" gap=\"2\">\n"
+        "<fy-col>\n\nleft\n\n</fy-col>\n"
+        "<fy-col>\n\nright\n\n</fy-col>\n"
+        "</fy-columns>\n");
+    n = row_of(out, "left");
+    line = row(out, n, buf, sizeof(buf));
+    /* 34 * 1/4 is 8.5: the largest remainders give the first column 9 */
+    CHECK(strstr(line, "right") == line + 2 + 9 + 2);
+    if(strstr(line, "right") != line + 13)
+        dump("weighted columns", out);
+    fymd_free(out);
+
+    /* a minimum holds a weighted column that its share would squeeze */
+    out = render(r,
+        "<fy-columns widths=\"*,9*\" gap=\"2\" min=\"12\">\n"
+        "<fy-col>\n\nleft\n\n</fy-col>\n"
+        "<fy-col>\n\nright\n\n</fy-col>\n"
+        "</fy-columns>\n");
+    n = row_of(out, "left");
+    line = row(out, n, buf, sizeof(buf));
+    CHECK(strstr(line, "right") == line + 2 + 12 + 2);
+    if(strstr(line, "right") != line + 16)
+        dump("column minimum", out);
+    fymd_free(out);
+
+    /* fixed, percent and weighted sizes together */
+    out = render(r,
+        "<fy-columns widths=\"6,50%,*\" gap=\"1\">\n"
+        "<fy-col>\n\na\n\n</fy-col>\n"
+        "<fy-col>\n\nb\n\n</fy-col>\n"
+        "<fy-col>\n\nc\n\n</fy-col>\n"
+        "</fy-columns>\n");
+    n = row_of(out, "a");
+    line = row(out, n, buf, sizeof(buf));
+    /* 36 less 2 gaps is 34: 6, then 17, then the 11 left */
+    CHECK(line[2] == 'a' && line[2 + 6 + 1] == 'b' && line[2 + 6 + 1 + 17 + 1] == 'c');
+    if(!(line[9] == 'b' && line[27] == 'c'))
+        dump("mixed sizes", out);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+
+    /* weighted elastic slots share the rows the page leaves over */
+    r = renderer(1, 40, 20);
+    out = render(r, "top\n\n<fy-slot id=\"a\" height=\"*\"/>\n\nmid\n\n"
+                    "<fy-slot id=\"b\" height=\"3*\"/>\n\nbot\n");
+    a = region_find(r, "a");
+    b = region_find(r, "b");
+    CHECK(a != NULL && b != NULL && a->height > 0 &&
+          (b->height == 3 * a->height || b->height == 3 * a->height + 1 ||
+           b->height == 3 * a->height - 1 || b->height == 3 * a->height + 2));
+    CHECK(rows(out) <= 20 && row_of(out, "bot") >= 18);
+    if(a == NULL || b == NULL || row_of(out, "bot") < 18)
+        dump("weighted slots", out);
+    fymd_free(out);
+
+    /* a vfill weight moves the middle row towards the bottom */
+    out = render(r, "top\n\n<fy-vfill weight=\"3\"/>\n\nmid\n\n<fy-vfill/>\n\nbot\n");
+    n = row_of(out, "mid");
+    CHECK(n > row_of(out, "top") + 8 && row_of(out, "bot") >= 18);
+    if(n <= 8)
+        dump("weighted vfill", out);
+    fymd_free(out);
+
+    /* a minimum is held when the page is full: a scroll body gives rows up */
+    fymd_renderer_set_height(r, 8);
+    out = render(r, "head\n\n<fy-scroll anchor=\"bottom\">\n\n"
+                    "* one\n* two\n* three\n* four\n\n</fy-scroll>\n\n"
+                    "<fy-slot id=\"pane\" height=\"*\" min=\"4\"/>\n\nfoot\n");
+    a = region_find(r, "pane");
+    CHECK(a != NULL && a->height >= 4);
+    CHECK(out != NULL && strstr(out, "head") && strstr(out, "foot") &&
+          !strstr(out, "one"));
+    if(a == NULL || a->height < 4)
+        dump("slot minimum", out);
+    fymd_free(out);
+
+    /* without a page height an elastic slot has its least rows */
+    fymd_renderer_set_height(r, 0);
+    out = render(r, "<fy-slot id=\"pane\" height=\"2*\" min=\"3\"/>\n");
+    a = region_find(r, "pane");
+    CHECK(a != NULL && a->height == 3);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+}
+
 int
 main(void)
 {
@@ -590,6 +689,7 @@ main(void)
     test_columns();
     test_vertical();
     test_slots();
+    test_weights();
 #ifdef FYMD_TEST_PALETTE
     test_palette();
 #endif
