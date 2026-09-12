@@ -19,6 +19,7 @@
 static const char theme[] =
     "colors:\n"
     "  head: '#0a0a0a'\n"
+    "  sub: '#111111'\n"
     "  code: '#0c0c0c'\n"
     "  link: '#0d0d0d'\n"
     "  line: '#0e0e0e'\n"
@@ -26,7 +27,10 @@ static const char theme[] =
     "  add: '#101010'\n"
     "roles:\n"
     "  md:\n"
-    "    heading: {fg: head, attrs: [bold]}\n"
+    "    heading:\n"
+    "      fg: head\n"
+    "      attrs: [bold]\n"
+    "      2: {fg: sub}\n"
     "    code: {fg: code}\n"
     "    link: {fg: link, ul: line, attrs: [underline]}\n"
     "  code:\n"
@@ -36,6 +40,8 @@ static const char theme[] =
 
 static const char doc[] =
     "# Plan\n"
+    "\n"
+    "## Steps\n"
     "\n"
     "Use `peek` and [the notes](http://example.com).\n"
     "\n"
@@ -138,7 +144,9 @@ main(void)
 
     CHECK(fymd_renderer_set_palette(r, palette) == 0);
     out = render(r);
-    expect(__LINE__, out, "38;2;10;10;10", NULL);
+    expect(__LINE__, out, "38;2;10;10;10mPlan", NULL);
+    /* a level takes its own role and keeps what it inherits */
+    expect(__LINE__, out, "\033[1;38;2;17;17;17mSteps", NULL);
     expect(__LINE__, out, "38;2;12;12;12", NULL);
     expect(__LINE__, out, "38;2;13;13;13", NULL);
     /* the underline colour survives the renderer's escape handling */
