@@ -114,6 +114,8 @@ typedef struct MD_ANSI_STYLE {
     struct fypal_ctx* palette;   /* borrowed palette of the overlay, or NULL */
     int palette_ascii;           /* the overlay took the ASCII glyph forms */
     const MD_BLOCK_RENDERER* block_renderers; /* borrowed from the renderer */
+    fymd_slot_render_fn slot_fn;              /* UI Markdown fy-slot, or NULL */
+    void* slot_userdata;
     size_t n_block_renderers;
     void* _palette;              /* opaque palette overlay: saved pairs, strings */
 

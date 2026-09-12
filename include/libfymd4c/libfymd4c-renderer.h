@@ -328,6 +328,8 @@ int fymd_render_with_margins(struct fymd_renderer *r,
  *                                text in a palette role
  *   <fy-glyph name="NAME" fallback="TEXT"/>
  *                                a palette glyph, or the fallback text
+ *   <fy-slot id="ID" width="N"/>
+ *                                N cells that another component draws
  *
  * and, each on a line of its own:
  *
@@ -336,17 +338,46 @@ int fymd_render_with_margins(struct fymd_renderer *r,
  *   <fy-vfill/>                  flexible blank rows, with a height
  *   <fy-scroll anchor="top|bottom"> ... </fy-scroll>
  *                                a body that gives up rows, with a height
+ *   <fy-slot id="ID" height="N|*"/>
+ *                                rows that another component draws, at the
+ *                                width of the page or of the column
  *
  * Give model output the flag only when the model may draw such chrome. */
 
-/* A clickable region of the last one-shot render: the rows and columns of the
- * label of an fy-act. A label that wraps has one region for each row. */
+enum fymd_region_kind {
+    FYMD_REGION_ACT = 0,   /* the label of an fy-act: clickable, one row */
+    FYMD_REGION_SLOT       /* an fy-slot: cells that another component draws */
+};
+
+/* A region of the last one-shot render. An fy-act label that wraps has one
+ * region for each row. A slot region has the rows and columns that its
+ * component draws into; an elastic slot that got no rows has a height of 0. */
 struct fymd_region {
     const char *id;
     size_t row;
     int col;
     int width;
+    int height;
+    enum fymd_region_kind kind;
 };
+
+/* Draw the content of an fy-slot of @width columns. @height is the rows of
+ * the slot, or 0 when the slot takes the rows that are emitted. An inline slot
+ * has a height of 1 and uses its first row. Emit the rows through @emit and
+ * return 0, or return -1 to leave the slot blank. The component can render
+ * Markdown into the slot with a renderer of its own; the renderer that calls
+ * it rejects a render while it renders. The content is clipped to the slot. An
+ * elastic slot (height="*") gets its rows only from the vertical layout, so it
+ * is not drawn here: draw it from its region after the render. */
+typedef int (*fymd_slot_render_fn)(void *userdata, const char *id, int width,
+        int height, enum fymd_block_flags flags, fymd_block_emit_fn emit,
+        void *emit_ctx);
+
+/* Register the renderer of every fy-slot, or NULL for blank slots.
+ * fymd_renderer_set_theme() keeps it. Rejected while a progressive stream
+ * exists. Returns 0 on success, -1 otherwise. */
+int fymd_renderer_set_slot_renderer(struct fymd_renderer *r,
+        fymd_slot_render_fn fn, void *userdata) FYMD_EXPORT;
 
 /* Lay out a FYMD_RF_UI render in @rows rows: the rows left over go to the
  * fy-vfill rows, and an fy-scroll body gives up the rows that do not fit, from

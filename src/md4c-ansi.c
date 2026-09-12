@@ -446,7 +446,8 @@ ui_track(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
         if(text[i] == '\n') {
             if(r->ui_act && r->ui_act_seg >= 0 && r->ui_col > r->ui_act_seg)
                 (void) md_ui_region_add(r->ui, r->ui_act_id, r->ui_act_len, row,
-                                        r->ui_act_seg, r->ui_col - r->ui_act_seg);
+                                        r->ui_act_seg, r->ui_col - r->ui_act_seg,
+                                        1, MD_UI_REGION_ACT);
             if(r->ui_act)
                 r->ui_act_seg = -1;     /* a wrapped label reopens on the next row */
             r->ui_col = 0;
@@ -509,8 +510,18 @@ out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
             if(r->ui_act && r->ui_act_seg >= 0 && r->ui_col > r->ui_act_seg)
                 (void) md_ui_region_add(r->ui, r->ui_act_id, r->ui_act_len,
                                         r->output_row, r->ui_act_seg,
-                                        r->ui_col - r->ui_act_seg);
+                                        r->ui_col - r->ui_act_seg,
+                                        1, MD_UI_REGION_ACT);
             r->ui_act = 0;
+        } else if(md_ui_marker_is(kind, kl, "keep")) {
+            /* holds a blank row of a slot through a column; ends here */
+        } else if(md_ui_marker_is(kind, kl, "slot")) {
+            /* the cells of a slot start here, at the column of the output */
+            size_t idl;
+            int sw, sh;
+            if(md_ui_slot_arg(arg, al, &idl, &sw, &sh) == 0)
+                (void) md_ui_region_add(r->ui, arg, idl, r->output_row,
+                                        r->ui_col, sw, sh, MD_UI_REGION_SLOT);
         } else if(r->flags & MD_ANSI_FLAG_UI_ROWS) {
             out_sink_raw(r, text + i, m);   /* a row marker, zero width */
         }
@@ -2923,7 +2934,9 @@ ui_marker(MD_ANSI* r, const char* kind, const char* arg, size_t arg_len, int dir
         render_verbatim(r, buf, (MD_SIZE) n);
 }
 
-/* An inline fy-* tag: fill, act, role or glyph. */
+static void ui_slot_inline(MD_ANSI* r, const MD_UI_TAG* t);
+
+/* An inline fy-* tag: fill, act, role, glyph or slot. */
 static void
 ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
@@ -2998,6 +3011,9 @@ ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
         v = md_ui_tag_attr(&t, "fallback", &vl);
         if(v != NULL)
             render_verbatim(r, v, (MD_SIZE) vl);
+    } else if(md_ui_tag_is(&t, "slot")) {
+        if(!t.closing)
+            ui_slot_inline(r, &t);
     }
 }
 
@@ -3143,6 +3159,9 @@ ui_row_blank(const char* p, MD_SIZE n)
     while(i < n) {
         e = ansi_esc_len(p + i, n - i);
         if(e > 0) {
+            if(e > MD_UI_MARK_OPEN_LEN &&
+               memcmp(p + i, MD_UI_MARK_OPEN, MD_UI_MARK_OPEN_LEN) == 0)
+                return 0;   /* a slot row: the column keeps it */
             i += e;
             continue;
         }
@@ -3264,7 +3283,212 @@ ui_row_marker(MD_ANSI* r, const char* kind, const char* arg, size_t arg_len)
     out_direct(r, "\n", 1);
 }
 
-/* The fy-* tags of an HTML block: columns, vfill and scroll. */
+
+#define MD_UI_SLOT_MAX_WIDTH  512
+#define MD_UI_SLOT_MAX_HEIGHT 1000
+
+/* The bytes of @buf that fit in @width columns. An escape takes no column and
+ * stays with the text before the cut. */
+static MD_SIZE
+ui_clip_cols(const char* buf, MD_SIZE size, int width)
+{
+    MD_SIZE i = 0, e, cl;
+    unsigned cp;
+    int w = 0, cw;
+
+    while(i < size) {
+        e = ansi_esc_len(buf + i, size - i);
+        if(e > 0) {
+            i += e;
+            continue;
+        }
+        cl = ansi_utf8_decode(buf + i, size - i, &cp);
+        cw = fymd_cp_width(cp);
+        if(w + cw > width)
+            break;
+        w += cw;
+        i += cl ? cl : 1;
+    }
+    return i;
+}
+
+/* Ask the slot renderer for the content of a slot; NULL leaves it blank. */
+static char*
+ui_slot_content(MD_ANSI* r, const char* id, int width, int height, size_t* len)
+{
+    ANSI_BLOCK_BUF buf;
+    int rc;
+
+    *len = 0;
+    if(r->style->slot_fn == NULL)
+        return NULL;
+    memset(&buf, 0, sizeof(buf));
+    rc = r->style->slot_fn(r->style->slot_userdata, id, width, height,
+                           (r->flags & MD_ANSI_FLAG_NO_COLOR) ? FYMD_BF_NO_COLOR : 0,
+                           custom_block_emit, &buf);
+    if(rc != 0 || buf.oom) {
+        free(buf.data);
+        return NULL;
+    }
+    *len = buf.size;
+    return buf.data;
+}
+
+/* The id and the dimension attribute of a slot tag. Returns 0, or -1. */
+static int
+ui_slot_attrs(const MD_UI_TAG* t, const char* dim, char* id, size_t id_size,
+              int* value, int* star)
+{
+    const char* v;
+    size_t vl;
+
+    v = md_ui_tag_attr(t, "id", &vl);
+    if(v == NULL || !md_ui_id_valid(v, vl) || vl >= id_size)
+        return -1;
+    memcpy(id, v, vl);
+    id[vl] = '\0';
+    *value = -1;
+    *star = 0;
+    v = md_ui_tag_attr(t, dim, &vl);
+    if(v != NULL && vl == 1 && v[0] == '*') {
+        *star = 1;
+    } else if(v != NULL) {
+        for(*value = 0; vl > 0 && *v >= '0' && *v <= '9'; v++, vl--)
+            if(*value < 100000)
+                *value = *value * 10 + (*v - '0');
+    }
+    return 0;
+}
+
+/*
+ * An inline slot: @width cells in the row, drawn by the slot renderer or left
+ * blank. The cells are non-breaking, so a row wraps around the slot and never
+ * inside it.
+ */
+static void
+ui_slot_inline(MD_ANSI* r, const MD_UI_TAG* t)
+{
+    static const char nbsp[] = "\xc2\xa0";
+    char id[64], arg[96];
+    const char* p;
+    char* content;
+    size_t clen, i, rowlen;
+    MD_SIZE clip, e;
+    int width, star, w = 0, n;
+
+    if(ui_slot_attrs(t, "width", id, sizeof(id), &width, &star) != 0)
+        return;
+    if(width < 1)
+        width = 1;
+    if(width > MD_UI_SLOT_MAX_WIDTH)
+        width = MD_UI_SLOT_MAX_WIDTH;
+    n = snprintf(arg, sizeof(arg), "%s:%d:1", id, width);
+    if(n > 0 && (size_t) n < sizeof(arg))
+        ui_marker(r, "slot", arg, (size_t) n, 0);
+
+    content = ui_slot_content(r, id, width, 1, &clen);
+    if(content != NULL) {
+        p = (const char*) memchr(content, '\n', clen);
+        rowlen = p ? (size_t)(p - content) : clen;
+        clip = ui_clip_cols(content, (MD_SIZE) rowlen, width);
+        w = ansi_disp_width(content, clip);
+        for(i = 0; i < clip; ) {
+            e = ansi_esc_len(content + i, clip - i);
+            if(e > 0) {
+                render_verbatim(r, content + i, e);
+                i += e;
+            } else if(content[i] == ' ') {
+                render_verbatim(r, nbsp, 2);
+                i++;
+            } else {
+                render_verbatim(r, content + i, 1);
+                i++;
+            }
+        }
+        free(content);
+    }
+    for(; w < width; w++)
+        render_verbatim(r, nbsp, 2);
+}
+
+/*
+ * A block slot: rows at the width of the page or of the column, drawn by the
+ * slot renderer or left blank. A height of "*" is elastic: with a page height
+ * the vertical layout gives it rows like a vfill, and it is reported only.
+ */
+static void
+ui_slot_block(MD_ANSI* r, const MD_UI_TAG* t)
+{
+    char id[64], arg[112];
+    char* content;
+    const char* nl;
+    size_t clen, pos, end;
+    MD_SIZE clip;
+    int height, star, width, rows = 0, h, k, n, indent;
+
+    if(ui_slot_attrs(t, "height", id, sizeof(id), &height, &star) != 0)
+        return;
+    if(r->line_open)
+        flush_wrapped(r);
+    if(r->need_newline) {
+        render_separator(r);
+        r->need_newline = 0;
+    }
+    indent = ansi_indent_width(r);
+    width = (r->wrap_cols > 0 ? r->wrap_cols : 80) - indent - DOC_MARGIN;
+    if(width < 1)
+        width = 1;
+
+    if(star) {
+        if((r->flags & MD_ANSI_FLAG_UI_ROWS) && !r->ui_col_depth) {
+            n = snprintf(arg, sizeof(arg), "%s:%d:%d", id, indent, width);
+            if(n > 0 && (size_t) n < sizeof(arg))
+                ui_row_marker(r, "vslot", arg, (size_t) n);
+            r->need_newline = 1;
+            return;
+        }
+        height = 1;     /* no page to take rows from: one row */
+    }
+
+    content = ui_slot_content(r, id, width, height > 0 ? height : 0, &clen);
+    for(pos = 0; content != NULL && pos < clen; pos = end + 1) {
+        nl = (const char*) memchr(content + pos, '\n', clen - pos);
+        end = nl ? (size_t)(nl - content) : clen;
+        rows++;
+    }
+    h = height > 0 ? height : (rows > 0 ? rows : 1);
+    if(h > MD_UI_SLOT_MAX_HEIGHT)
+        h = MD_UI_SLOT_MAX_HEIGHT;
+
+    for(k = 0, pos = 0; k < h; k++) {
+        render_indent(r);
+        if(k == 0) {
+            n = snprintf(arg, sizeof(arg), "%s:%d:%d", id, width, h);
+            if(n > 0 && (size_t) n < sizeof(arg))
+                ui_marker(r, "slot", arg, (size_t) n, 1);
+        } else {
+            /* a blank slot row is a row: a column must not trim it */
+            ui_marker(r, "keep", NULL, 0, 1);
+        }
+        if(content != NULL && k < rows) {
+            nl = (const char*) memchr(content + pos, '\n', clen - pos);
+            end = nl ? (size_t)(nl - content) : clen;
+            clip = ui_clip_cols(content + pos, (MD_SIZE)(end - pos), width);
+            if(clip > 0) {
+                out_direct(r, content + pos, clip);
+                if(memchr(content + pos, 0x1b, clip) != NULL &&
+                   !(r->flags & MD_ANSI_FLAG_NO_COLOR))
+                    out_direct(r, "\x1b[0m", 4);
+            }
+            pos = end + 1;
+        }
+        out_direct(r, "\n", 1);
+    }
+    free(content);
+    r->need_newline = 1;
+}
+
+/* The fy-* tags of an HTML block: columns, vfill, scroll and slot. */
 static void
 ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
 {
@@ -3322,6 +3546,8 @@ ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
                 v = md_ui_tag_attr(&t, "anchor", &vl);
                 ui_row_marker(r, "scroll", v, v ? vl : 0);
             }
+        } else if(md_ui_tag_is(&t, "slot") && !t.closing) {
+            ui_slot_block(r, &t);
         }
 next:
         if(t.len > 0)

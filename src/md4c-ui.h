@@ -23,12 +23,19 @@ extern "C" {
 #define MD_UI_MARK_OPEN_LEN 5
 #define MD_UI_MARK_CLOSE    "\x1b\\"
 
-/* A clickable region of the output. The id is owned. */
+typedef enum {
+    MD_UI_REGION_ACT,           /* the label of an fy-act, one row */
+    MD_UI_REGION_SLOT           /* an fy-slot that another component draws */
+} MD_UI_REGION_KIND;
+
+/* A region of the output. The id is owned. */
 typedef struct MD_ANSI_REGION {
     char* id;
     size_t row;
     int col;
     int width;
+    int height;
+    int kind;                   /* MD_UI_REGION_KIND */
 } MD_ANSI_REGION;
 
 typedef struct MD_ANSI_UI {
@@ -40,7 +47,10 @@ typedef struct MD_ANSI_UI {
 void md_ui_reset(MD_ANSI_UI* ui);
 void md_ui_fini(MD_ANSI_UI* ui);
 int md_ui_region_add(MD_ANSI_UI* ui, const char* id, size_t id_len,
-                     size_t row, int col, int width);
+                     size_t row, int col, int width, int height, int kind);
+
+/* Split a slot marker argument "ID:A:B". Returns 0, or -1 when it is not one. */
+int md_ui_slot_arg(const char* arg, size_t len, size_t* id_len, int* a, int* b);
 
 #define MD_UI_ATTR_MAX 6
 

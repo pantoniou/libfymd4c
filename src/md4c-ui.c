@@ -34,7 +34,7 @@ md_ui_fini(MD_ANSI_UI* ui)
 
 int
 md_ui_region_add(MD_ANSI_UI* ui, const char* id, size_t id_len, size_t row,
-                 int col, int width)
+                 int col, int width, int height, int kind)
 {
     MD_ANSI_REGION* nr;
     char* copy;
@@ -59,8 +59,51 @@ md_ui_region_add(MD_ANSI_UI* ui, const char* id, size_t id_len, size_t row,
     ui->regions[ui->count].row = row;
     ui->regions[ui->count].col = col;
     ui->regions[ui->count].width = width;
+    ui->regions[ui->count].height = height;
+    ui->regions[ui->count].kind = kind;
     ui->count++;
     return 0;
+}
+
+int
+md_ui_slot_arg(const char* arg, size_t len, size_t* id_len, int* a, int* b)
+{
+    size_t i, sep[2], found = 0;
+    int v[2], k;
+
+    if(arg == NULL)
+        return -1;
+    /* the id may hold ':', so the numbers are the last two fields */
+    for(i = len; i > 0 && found < 2; i--)
+        if(arg[i - 1] == ':')
+            sep[found++] = i - 1;
+    if(found < 2)
+        return -1;
+    for(k = 0; k < 2; k++) {
+        size_t from = sep[1 - k] + 1, to = k == 0 ? sep[0] : len;
+        if(from >= to)
+            return -1;
+        for(v[k] = 0, i = from; i < to; i++) {
+            if(arg[i] < '0' || arg[i] > '9')
+                return -1;
+            v[k] = v[k] * 10 + (arg[i] - '0');
+        }
+    }
+    *id_len = sep[1];
+    *a = v[0];
+    *b = v[1];
+    return 0;
+}
+
+static int
+region_cmp(const void* pa, const void* pb)
+{
+    const MD_ANSI_REGION* a = (const MD_ANSI_REGION*) pa;
+    const MD_ANSI_REGION* b = (const MD_ANSI_REGION*) pb;
+
+    if(a->row != b->row)
+        return a->row < b->row ? -1 : 1;
+    return a->col < b->col ? -1 : a->col > b->col;
 }
 
 static int
@@ -231,6 +274,11 @@ typedef struct {
     int anchor_top;     /* ROW_SCROLL */
     int keep;           /* ROW_CONTENT */
     size_t pad;         /* ROW_VFILL: blank rows it becomes */
+    const char* slot_id;/* ROW_VFILL of an elastic fy-slot, or NULL */
+    size_t slot_id_len;
+    int slot_col;
+    int slot_width;
+    size_t slot_row;    /* the first output row of its blank rows */
 } UI_ROW;
 
 enum { ROW_CONTENT, ROW_VFILL, ROW_SCROLL, ROW_END };
@@ -269,6 +317,14 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
         if(mlen != 0 && mlen == end - pos) {
             if(md_ui_marker_is(kind, kl, "vfill")) {
                 rows[nrows].type = ROW_VFILL;
+                nvfill++;
+            } else if(md_ui_marker_is(kind, kl, "vslot") &&
+                      md_ui_slot_arg(arg, al, &rows[nrows].slot_id_len,
+                                     &rows[nrows].slot_col,
+                                     &rows[nrows].slot_width) == 0) {
+                /* an elastic slot takes its share like a vfill */
+                rows[nrows].type = ROW_VFILL;
+                rows[nrows].slot_id = arg;
                 nvfill++;
             } else if(md_ui_marker_is(kind, kl, "scroll")) {
                 rows[nrows].type = ROW_SCROLL;
@@ -326,6 +382,7 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
     for(i = 0, o = 0, newrow = 0; i < nrows; i++) {
         map[i] = (size_t) -1;
         if(rows[i].type == ROW_VFILL) {
+            rows[i].slot_row = newrow;
             for(k = 0; k < rows[i].pad; k++) {
                 buf[o++] = '\n';
                 newrow++;
@@ -347,14 +404,33 @@ md_ui_vertical(const char* in, size_t len, int height, MD_ANSI_UI* ui,
     if(ui != NULL) {
         for(i = 0, k = 0; i < ui->count; i++) {
             MD_ANSI_REGION rg = ui->regions[i];
-            if(rg.row >= nrows || map[rg.row] == (size_t) -1) {
+            size_t h = rg.height > 0 ? (size_t) rg.height : 1, first = (size_t) -1, kept = 0;
+            /* a region keeps the rows of it that stay, from the first */
+            for(j = rg.row; j < rg.row + h && j < nrows; j++)
+                if(map[j] != (size_t) -1) {
+                    if(first == (size_t) -1)
+                        first = map[j];
+                    kept++;
+                }
+            if(first == (size_t) -1) {
                 free(rg.id);
                 continue;
             }
-            rg.row = map[rg.row];
+            rg.row = first;
+            if(rg.height > 0)
+                rg.height = (int) kept;
             ui->regions[k++] = rg;
         }
         ui->count = k;
+        /* an elastic slot is the blank rows that the layout gave it */
+        for(i = 0; i < nrows; i++)
+            if(rows[i].slot_id != NULL)
+                (void) md_ui_region_add(ui, rows[i].slot_id, rows[i].slot_id_len,
+                                        rows[i].slot_row, rows[i].slot_col,
+                                        rows[i].slot_width, (int) rows[i].pad,
+                                        MD_UI_REGION_SLOT);
+        if(ui->count > 1)
+            qsort(ui->regions, ui->count, sizeof(ui->regions[0]), region_cmp);
     }
     free(rows);
     free(map);

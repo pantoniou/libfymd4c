@@ -64,6 +64,9 @@ struct fymd_renderer {
     struct fymd_region *regions;    /* public view of ui.regions */
     size_t regions_alloc;
     int height;                     /* rows of the vertical UI layout, or 0 */
+    fymd_slot_render_fn slot_fn;    /* the renderer of fy-slot, or NULL */
+    void *slot_userdata;
+    int rendering;                  /* a one-shot render is in progress */
 };
 
 static int fymd_buf_finish(struct fymd_buf *b, char **out, size_t *out_len);
@@ -632,6 +635,8 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
     /* A new theme keeps the block renderers and the palette of the old one. */
     style->block_renderers = r->blocks;
     style->n_block_renderers = r->nblocks;
+    style->slot_fn = r->slot_fn;
+    style->slot_userdata = r->slot_userdata;
     if(r->palette != NULL &&
        md_ansi_style_set_palette_glyphs(style, r->palette,
                (r->palette_flags & FYMD_PF_ASCII) != 0) != 0) {
@@ -776,16 +781,13 @@ apply:
 }
 
 static int
-fymd_render_(struct fymd_renderer *r, const char *md, size_t len,
+fymd_render_locked(struct fymd_renderer *r, const char *md, size_t len,
              fymd_margin_fn margin_fn, void *margin_userdata,
              char **out, size_t *out_len)
 {
     struct fymd_buf b;
     unsigned rf;
     int ui, rc;
-
-    if(r == NULL || out == NULL)
-        return -1;
 
     rf = r->renderer_flags;
     ui = (rf & MD_ANSI_FLAG_UI) != 0;
@@ -849,6 +851,36 @@ fymd_render_(struct fymd_renderer *r, const char *md, size_t len,
     return 0;
 }
 
+/* A slot renderer can render with a renderer of its own, not with the one that
+ * calls it: the render state and the regions belong to the render. */
+static int
+fymd_render_(struct fymd_renderer *r, const char *md, size_t len,
+             fymd_margin_fn margin_fn, void *margin_userdata,
+             char **out, size_t *out_len)
+{
+    int rc;
+
+    if(r == NULL || out == NULL || r->rendering)
+        return -1;
+    r->rendering = 1;
+    rc = fymd_render_locked(r, md, len, margin_fn, margin_userdata, out, out_len);
+    r->rendering = 0;
+    return rc;
+}
+
+int
+fymd_renderer_set_slot_renderer(struct fymd_renderer *r,
+        fymd_slot_render_fn fn, void *userdata)
+{
+    if(r == NULL || r->style == NULL || r->stream != NULL || r->rendering)
+        return -1;
+    r->slot_fn = fn;
+    r->slot_userdata = fn ? userdata : NULL;
+    r->style->slot_fn = r->slot_fn;
+    r->style->slot_userdata = r->slot_userdata;
+    return 0;
+}
+
 int
 fymd_renderer_set_height(struct fymd_renderer *r, int rows)
 {
@@ -879,6 +911,9 @@ fymd_renderer_get_regions(struct fymd_renderer *r,
         r->regions[i].row = r->ui.regions[i].row;
         r->regions[i].col = r->ui.regions[i].col;
         r->regions[i].width = r->ui.regions[i].width;
+        r->regions[i].height = r->ui.regions[i].height;
+        r->regions[i].kind = r->ui.regions[i].kind == MD_UI_REGION_SLOT ?
+                             FYMD_REGION_SLOT : FYMD_REGION_ACT;
     }
     *regions = r->regions;
     *count = r->ui.count;
