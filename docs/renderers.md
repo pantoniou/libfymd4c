@@ -138,6 +138,22 @@ changes its variant or capabilities. `fymd_renderer_set_theme()` keeps the
 palette. `NULL` returns to the theme. The call is rejected while a progressive
 stream exists and when the library is built without libfypalette.
 
+A palette can also give the glyphs of the document. Each glyph that the
+palette defines replaces the glyph of the theme:
+
+| glyph | palette glyph |
+|---|---|
+| list bullet | `md.bullet` |
+| task marks | `md.task.done`, `md.task.open` |
+| quote bar / bar of a card | `md.quote.bar`, `md.card.bar` |
+| table grid | `md.table.vertical`, `.horizontal`, `.cross` |
+| indicator | `tool.pending` and its frames `tool.pending.1` to `.7`, `tool.ok`, `tool.fail` |
+
+The `gutter.cols` parameter of the palette sets the document margin: the columns
+before the text and after it. `fymd_renderer_set_palette_flags()` with
+`FYMD_PF_ASCII` takes the ASCII form of each glyph, for a terminal without the
+UTF-8 forms. `fymd_renderer_set_palette()` takes the UTF-8 forms.
+
 The build uses libfypalette when it finds the package: `-DMD4C_FYPALETTE=on`
 makes it required and `-DMD4C_FYPALETTE=off` disables it. `fymd4c
 --palette=ember` renders with a palette theme.
