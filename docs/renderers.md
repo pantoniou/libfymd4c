@@ -81,6 +81,10 @@ Every other element keeps the pair of its theme. The roles are:
 | plain fenced code | `code.plain` | indicators | `tool.pending` / `tool.ok` / `tool.fail` |
 | rules | `md.rule` | | |
 
+A heading of level N takes `md.heading.N`, which answers with `md.heading`
+when the theme does not define the level. A YAML theme sets a level with the
+element `headingN`; a level it does not name uses `heading`.
+
 A role query answers with the nearest defined ancestor, so `md.link.wiki`
 takes `md.link` when the theme does not define it. A role marked * must be
 defined itself: the ancestor of a row or a card styles another extent.
