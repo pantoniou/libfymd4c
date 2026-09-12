@@ -132,6 +132,8 @@ rows(const char *out)
     return n;
 }
 
+static size_t cols(const char *s);
+
 static void
 test_fill(void)
 {
@@ -155,6 +157,20 @@ test_fill(void)
     CHECK(strlen(line) == 18 && line[10] == 'm' && line[17] == 'z');
     if(strlen(line) != 18 || line[10] != 'm')
         dump("two fills", out);
+    fymd_free(out);
+
+    /* a fill with a glyph draws its columns with it */
+    out = render(r, "a<fy-fill char=\"\u2500\"/>b\n");
+    line = row(out, 0, buf, sizeof(buf));
+    CHECK(strstr(line, "a\u2500\u2500") != NULL && strstr(line, "\u2500b") != NULL &&
+          cols(line) == 18);
+    if(strstr(line, "\u2500b") == NULL || cols(line) != 18)
+        dump("fill glyph", out);
+    fymd_free(out);
+    /* a glyph of two columns is not a fill glyph: blanks instead */
+    out = render(r, "a<fy-fill char=\"\u4e00\"/>b\n");
+    line = row(out, 0, buf, sizeof(buf));
+    CHECK(strstr(line, "\u4e00") == NULL && cols(line) == 18);
     fymd_free(out);
     fymd_renderer_destroy(r);
 
