@@ -238,6 +238,10 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(fenced-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME fenced-api COMMAND fenced-api-test)
 
+        add_executable(block-renderer-api-test test/block-renderer-api-test.c)
+        target_link_libraries(block-renderer-api-test PRIVATE libfymd4c::libfymd4c)
+        add_test(NAME block-renderer-api COMMAND block-renderer-api-test)
+
         if(MD4C_WITH_FYPALETTE)
             add_executable(palette-api-test test/palette-api-test.c)
             target_link_libraries(palette-api-test PRIVATE
