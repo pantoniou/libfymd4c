@@ -86,8 +86,9 @@
  * vertical column separators, per-column alignment, and fit-to-terminal-width
  * with cell word-wrap. Separator/vertical/cross glyphs come from r->style. */
 
-/* Document margin reserved on each side of every line (like glow). */
-#define DOC_MARGIN          2
+/* Document margin reserved on each side of every line (like glow). The style
+ * sets it; a palette takes it from its gutter. */
+#define DOC_MARGIN          (r->style->doc_margin)
 
 
 /* Code block metadata entry (heap-allocated when MD_ANSI_FLAG_CODE_META is set) */
@@ -471,6 +472,15 @@ render_ansi(MD_ANSI* r, const char* code)
 }
 
 /* Emit the per-line indent chrome (document margin + quote/alert/list). */
+/* The quote bar: a card has a bar of its own when the style gives one. */
+static const char*
+quote_bar(const MD_ANSI* r)
+{
+    if(r->card && r->style->card_bar != NULL)
+        return r->style->card_bar;
+    return r->style->blockquote_bar;
+}
+
 static void
 render_document_margin(MD_ANSI* r)
 {
@@ -491,7 +501,7 @@ render_indent_chrome(MD_ANSI* r)
     render_document_margin(r);
     for(i = 0; i < r->quote_depth; i++) {
         render_ansi(r, r->style->blockquote.on);
-        RENDER_VERBATIM(r, r->style->blockquote_bar);
+        RENDER_VERBATIM(r, quote_bar(r));
         RENDER_VERBATIM(r, " ");
         render_ansi(r, r->style->blockquote.off);
     }
@@ -592,7 +602,7 @@ render_separator(MD_ANSI* r)
         render_document_margin(r);
         for(i = 0; i < r->quote_depth; i++) {
             render_ansi(r, r->style->blockquote.on);
-            RENDER_VERBATIM(r, r->style->blockquote_bar);
+            RENDER_VERBATIM(r, quote_bar(r));
             render_ansi(r, r->style->blockquote.off);
             if(i + 1 < r->quote_depth)
                 RENDER_VERBATIM(r, " ");
@@ -2709,11 +2719,12 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             if(li->is_task) {
                 if(li->task_mark == 'x' || li->task_mark == 'X') {
                     render_ansi(r, r->style->task_done.on);
-                    RENDER_VERBATIM(r, "[x] ");
+                    RENDER_VERBATIM(r, r->style->task_done_glyph);
                     render_ansi(r, r->style->task_done.off);
                 } else {
-                    RENDER_VERBATIM(r, "[ ] ");
+                    RENDER_VERBATIM(r, r->style->task_open_glyph);
                 }
+                RENDER_VERBATIM(r, " ");
             } else if(top >= 0 && top < MD_ANSI_MAX_LIST && r->lists[top].ordered) {
                 char buf[16];
                 snprintf(buf, sizeof(buf), "%d. ", r->lists[top].counter);

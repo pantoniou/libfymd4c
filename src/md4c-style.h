@@ -81,6 +81,10 @@ typedef struct MD_ANSI_STYLE {
     const char* table_vertical;
     const char* table_horizontal;
     const char* table_cross;
+    const char* task_done_glyph; /* checked task-list marker, without the space */
+    const char* task_open_glyph; /* open task-list marker, without the space */
+    const char* card_bar;        /* quote bar of a card; NULL uses blockquote_bar */
+    int         doc_margin;      /* columns before the text and after it */
     int         table_border_none; /* true: no separator or vertical grid glyphs */
 
     MD_STYLE_BG  background;      /* resolved document background (never AUTO) */
@@ -155,6 +159,13 @@ struct fypal_ctx;
  * copied, so call again after the palette changes variant or capabilities.
  * Returns 0, or -1 on allocation failure or without palette support. */
 int md_ansi_style_set_palette(MD_ANSI_STYLE* s, struct fypal_ctx* palette);
+
+/* md_ansi_style_set_palette() that also takes the glyphs and the document
+ * margin of the palette. A glyph the palette defines replaces the glyph of the
+ * theme: the ASCII form when @ascii is non-zero, else the UTF-8 form. The
+ * gutter.cols parameter sets the document margin. */
+int md_ansi_style_set_palette_glyphs(MD_ANSI_STYLE* s, struct fypal_ctx* palette,
+                                     int ascii);
 
 /* The block renderer registered for the language @lang of @len bytes, or NULL. */
 const MD_BLOCK_RENDERER* md_ansi_style_block_renderer(const MD_ANSI_STYLE* s,

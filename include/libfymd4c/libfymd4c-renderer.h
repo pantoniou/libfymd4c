@@ -267,6 +267,20 @@ struct fypal_ctx;
 int fymd_renderer_set_palette(struct fymd_renderer *r,
                               struct fypal_ctx *palette) FYMD_EXPORT;
 
+enum fymd_palette_flags {
+    FYMD_PF_ASCII = FYMD_BIT(0), /* the ASCII form of each palette glyph */
+};
+
+/* fymd_renderer_set_palette() that also chooses the form of the glyphs. The
+ * palette gives the renderer its glyphs as well as its colours: the list
+ * bullet, the task marks, the quote and card bars, the table grid and the
+ * indicator frames. Its gutter.cols parameter sets the document margin. A
+ * glyph or a parameter that the palette does not define keeps the theme
+ * value. fymd_renderer_set_palette() is this call with no flags. */
+int fymd_renderer_set_palette_flags(struct fymd_renderer *r,
+                                    struct fypal_ctx *palette,
+                                    enum fymd_palette_flags flags) FYMD_EXPORT;
+
 /* The active theme's resolved reverse-card escape pair.
  * Returns 0 on success, -1 if r or its *style is NULL */
 int fymd_renderer_get_reverse_pair(struct fymd_renderer *r,

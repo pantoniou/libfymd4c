@@ -47,6 +47,7 @@ struct fymd_renderer {
     struct fyts_ctx *fyts_ctx;
 #endif
     struct fypal_ctx *palette;      /* borrowed; overlaid on style, or NULL */
+    enum fymd_palette_flags palette_flags;
     MD_BLOCK_RENDERER *blocks;      /* block renderers; the style borrows them */
     size_t nblocks;
 
@@ -621,7 +622,9 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
     /* A new theme keeps the block renderers and the palette of the old one. */
     style->block_renderers = r->blocks;
     style->n_block_renderers = r->nblocks;
-    if(r->palette != NULL && md_ansi_style_set_palette(style, r->palette) != 0) {
+    if(r->palette != NULL &&
+       md_ansi_style_set_palette_glyphs(style, r->palette,
+               (r->palette_flags & FYMD_PF_ASCII) != 0) != 0) {
         md_ansi_style_destroy(style);
         free(theme);
         return -1;
@@ -644,14 +647,25 @@ fymd_renderer_set_theme(struct fymd_renderer *r, const char *name)
 int
 fymd_renderer_set_palette(struct fymd_renderer *r, struct fypal_ctx *palette)
 {
+    return fymd_renderer_set_palette_flags(r, palette, 0);
+}
+
+int
+fymd_renderer_set_palette_flags(struct fymd_renderer *r,
+                                struct fypal_ctx *palette,
+                                enum fymd_palette_flags flags)
+{
     if(r == NULL || r->style == NULL || r->stream != NULL)
         return -1;
-    if(md_ansi_style_set_palette(r->style, palette) != 0) {
+    if(md_ansi_style_set_palette_glyphs(r->style, palette,
+                                        (flags & FYMD_PF_ASCII) != 0) != 0) {
         /* The overlay is gone: the style is back on its theme. */
         r->palette = NULL;
+        r->palette_flags = 0;
         return -1;
     }
     r->palette = palette;
+    r->palette_flags = palette ? flags : 0;
 #ifdef MD4C_WITH_FYTS
     /* A retained highlighter holds the palette it was given. */
     fyts_ctx_destroy(r->fyts_ctx);

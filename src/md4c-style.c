@@ -250,6 +250,10 @@ build_style(MD_ANSI_STYLE* s, STRREG* reg, fy_generic root, const MD_ANSI_STYLE_
     s->table_vertical   = load_str(reg, glyphs, "table_vertical",   "\xe2\x94\x82");
     s->table_horizontal = load_str(reg, glyphs, "table_horizontal", "\xe2\x94\x80");
     s->table_cross      = load_str(reg, glyphs, "table_cross",      "\xe2\x94\xbc");
+    s->task_done_glyph  = load_str(reg, glyphs, "task_done",        "[x]");
+    s->task_open_glyph  = load_str(reg, glyphs, "task_open",        "[ ]");
+    s->card_bar         = NULL;
+    s->doc_margin       = 2;
     s->table_border_none = strcmp(fy_get(table, "border", "grid"), "none") == 0;
 
     s->code_enabled = fy_get(code, "enabled", (_Bool) true);
@@ -471,11 +475,44 @@ static const struct {
 
 #define PALETTE_PAIR_COUNT (sizeof(palette_pairs) / sizeof(palette_pairs[0]))
 
-/* The theme pairs the overlay replaced, and the strings it owns. */
+/* The palette glyph of each glyph field. The indicator frames are the glyph
+ * tool.pending and its numbered children. */
+static const struct {
+    size_t offset;
+    const char* glyph;
+} palette_glyphs[] = {
+    { offsetof(MD_ANSI_STYLE, blockquote_bar),          "md.quote.bar" },
+    { offsetof(MD_ANSI_STYLE, list_bullet),             "md.bullet" },
+    { offsetof(MD_ANSI_STYLE, table_vertical),          "md.table.vertical" },
+    { offsetof(MD_ANSI_STYLE, table_horizontal),        "md.table.horizontal" },
+    { offsetof(MD_ANSI_STYLE, table_cross),             "md.table.cross" },
+    { offsetof(MD_ANSI_STYLE, task_done_glyph),         "md.task.done" },
+    { offsetof(MD_ANSI_STYLE, task_open_glyph),         "md.task.open" },
+    { offsetof(MD_ANSI_STYLE, card_bar),                "md.card.bar" },
+    { offsetof(MD_ANSI_STYLE, indicator_success_glyph), "tool.ok" },
+    { offsetof(MD_ANSI_STYLE, indicator_failure_glyph), "tool.fail" },
+};
+
+#define PALETTE_GLYPH_COUNT (sizeof(palette_glyphs) / sizeof(palette_glyphs[0]))
+#define PALETTE_FRAME_MAX   8
+#define PALETTE_MARGIN_MAX  16
+
+/* The theme pairs, glyphs and margin the overlay replaced, and the strings it
+ * owns. */
 typedef struct {
     MD_STYLE_PAIR saved[PALETTE_PAIR_COUNT];
+    const char* saved_glyphs[PALETTE_GLYPH_COUNT];
+    const char* saved_frames[PALETTE_FRAME_MAX];
+    size_t saved_frame_count;
+    int saved_doc_margin;
     STRREG reg;
 } PALETTE_OVERLAY;
+
+static const char**
+palette_glyph(MD_ANSI_STYLE* s, size_t i)
+{
+    return (const char**) ((char*) s + palette_glyphs[i].offset);
+}
 
 static MD_STYLE_PAIR*
 palette_pair(MD_ANSI_STYLE* s, size_t i)
@@ -493,19 +530,61 @@ palette_overlay_remove(MD_ANSI_STYLE* s)
         return;
     for(i = 0; i < PALETTE_PAIR_COUNT; i++)
         *palette_pair(s, i) = ov->saved[i];
+    for(i = 0; i < PALETTE_GLYPH_COUNT; i++)
+        *palette_glyph(s, i) = ov->saved_glyphs[i];
+    memcpy(s->indicator_pending_frames, ov->saved_frames,
+           sizeof(ov->saved_frames));
+    s->indicator_pending_frame_count = ov->saved_frame_count;
+    s->doc_margin = ov->saved_doc_margin;
     reg_free(&ov->reg);
     free(ov);
     s->_palette = NULL;
     s->palette = NULL;
 }
 
+#ifdef MD4C_WITH_FYPALETTE
+/* The frames of the pending indicator: tool.pending, then its children 1 to 7
+ * until one is not defined. An undefined child returns frame 0. */
+static void
+palette_frames(MD_ANSI_STYLE* s, PALETTE_OVERLAY* ov,
+               struct fypal_ctx* palette, int ascii)
+{
+    const char* first;
+    const char* g;
+    char name[32];
+    size_t n;
+
+    first = fypal_ctx_glyph(palette, "tool.pending", ascii != 0);
+    if(first == NULL)
+        return;
+    s->indicator_pending_frames[0] = reg_dup(&ov->reg, first);
+    for(n = 1; n < PALETTE_FRAME_MAX; n++) {
+        snprintf(name, sizeof(name), "tool.pending.%zu", n);
+        g = fypal_ctx_glyph(palette, name, ascii != 0);
+        if(g == NULL || g == first)
+            break;
+        s->indicator_pending_frames[n] = reg_dup(&ov->reg, g);
+    }
+    s->indicator_pending_frame_count = n;
+}
+#endif
+
 int
 md_ansi_style_set_palette(MD_ANSI_STYLE* s, struct fypal_ctx* palette)
+{
+    return md_ansi_style_set_palette_glyphs(s, palette, 0);
+}
+
+int
+md_ansi_style_set_palette_glyphs(MD_ANSI_STYLE* s, struct fypal_ctx* palette,
+                                 int ascii)
 {
 #ifdef MD4C_WITH_FYPALETTE
     const struct fypal_role* role;
     PALETTE_OVERLAY* ov;
     MD_STYLE_PAIR* pair;
+    const char* glyph;
+    double cols;
     size_t i;
 
     if(s == NULL)
@@ -528,10 +607,25 @@ md_ansi_style_set_palette(MD_ANSI_STYLE* s, struct fypal_ctx* palette)
         pair->on = reg_dup(&ov->reg, fypal_role_on(palette, role));
         pair->off = reg_dup(&ov->reg, fypal_role_off(palette, role));
     }
+    for(i = 0; i < PALETTE_GLYPH_COUNT; i++) {
+        ov->saved_glyphs[i] = *palette_glyph(s, i);
+        glyph = fypal_ctx_glyph(palette, palette_glyphs[i].glyph, ascii != 0);
+        if(glyph != NULL)
+            *palette_glyph(s, i) = reg_dup(&ov->reg, glyph);
+    }
+    memcpy(ov->saved_frames, s->indicator_pending_frames,
+           sizeof(ov->saved_frames));
+    ov->saved_frame_count = s->indicator_pending_frame_count;
+    palette_frames(s, ov, palette, ascii);
+    ov->saved_doc_margin = s->doc_margin;
+    if(fypal_ctx_param(palette, "gutter.cols", &cols) == 0 &&
+       cols >= 0 && cols <= PALETTE_MARGIN_MAX)
+        s->doc_margin = (int) cols;
     s->_palette = ov;
     s->palette = palette;
     return 0;
 #else
+    (void) ascii;
     if(s == NULL)
         return -1;
     palette_overlay_remove(s);
