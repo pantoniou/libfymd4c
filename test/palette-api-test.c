@@ -135,6 +135,7 @@ main(void)
     };
     struct fymd_update upd;
     struct fypal_ctx *palette;
+    struct fypal_ctx *norules;
     struct fymd_renderer *r;
     const char *on, *off, *fin, *glyph;
     char *out;
@@ -257,6 +258,28 @@ main(void)
     fymd_renderer_destroy(r);
 
     CHECK(fymd_renderer_set_palette(NULL, palette) == -1);
+
+    /* a theme draws fenced blocks with their rules unless it turns them off */
+    r = renderer(FYMD_RF_NO_COLOR);
+    CHECK(r != NULL && fymd_renderer_set_palette(r, palette) == 0);
+    out = r ? render(r) : NULL;
+    expect(__LINE__, out, "\u2500\u2500 c ", NULL);
+    fymd_free(out);
+    norules = fypal_ctx_create(&caps);
+    CHECK(norules != NULL &&
+          fypal_ctx_load(norules, "params:\n  md.code.rules: 0\n", "test") == 0);
+    CHECK(r != NULL && fymd_renderer_set_palette(r, norules) == 0);
+    out = r ? render(r) : NULL;
+    expect(__LINE__, out, "int f(void)", "\u2500\u2500 c ");
+    expect(__LINE__, out, "@@ -1 +1 @@", "\u2500\u2500 diff");
+    fymd_free(out);
+    /* without the palette the theme rules return */
+    CHECK(r != NULL && fymd_renderer_set_palette(r, NULL) == 0);
+    out = r ? render(r) : NULL;
+    expect(__LINE__, out, "\u2500\u2500 c ", NULL);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+    fypal_ctx_destroy(norules);
 
     fypal_ctx_destroy(palette);
     return failures ? 1 : 0;
