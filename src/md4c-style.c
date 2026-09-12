@@ -507,6 +507,8 @@ typedef struct {
     const char* saved_frames[PALETTE_FRAME_MAX];
     size_t saved_frame_count;
     int saved_doc_margin;
+    const char* saved_code_header;
+    const char* saved_code_footer;
     STRREG reg;
 } PALETTE_OVERLAY;
 
@@ -538,6 +540,8 @@ palette_overlay_remove(MD_ANSI_STYLE* s)
            sizeof(ov->saved_frames));
     s->indicator_pending_frame_count = ov->saved_frame_count;
     s->doc_margin = ov->saved_doc_margin;
+    s->code_header = ov->saved_code_header;
+    s->code_footer = ov->saved_code_footer;
     s->palette_ascii = 0;
     reg_free(&ov->reg);
     free(ov);
@@ -625,6 +629,14 @@ md_ansi_style_set_palette_glyphs(MD_ANSI_STYLE* s, struct fypal_ctx* palette,
     if(fypal_ctx_param(palette, "gutter.cols", &cols) == 0 &&
        cols >= 0 && cols <= PALETTE_MARGIN_MAX)
         s->doc_margin = (int) cols;
+    /* md.code.rules: 0 draws a fenced block without the rows above and
+     * below it; the blank rows around a block still set it apart. */
+    ov->saved_code_header = s->code_header;
+    ov->saved_code_footer = s->code_footer;
+    if(fypal_ctx_param(palette, "md.code.rules", &cols) == 0 && cols == 0) {
+        s->code_header = "";
+        s->code_footer = "";
+    }
     s->_palette = ov;
     s->palette = palette;
     return 0;
