@@ -191,7 +191,7 @@ Inline tags:
 
 | tag | effect |
 |---|---|
-| `<fy-fill/>` | Flexible blank space. The columns that a row leaves over go to its fills, in equal shares, so one fill right-aligns the text after it and two fills center the text between them. In a table cell the fill takes the padding of the cell. A row without room gives a fill no columns. |
+| `<fy-fill/>` | Flexible blank space. The columns that a row leaves over go to its fills, in equal shares, so one fill right-aligns the text after it and two fills center the text between them. In a table cell the fill takes the padding of the cell. A row without room gives a fill no columns. `char="─"` draws the columns of the fill with that glyph, which must take one column; a rule that runs to the edge is `<fy-fill char="─"/>`. |
 | `<fy-act id="ID">label</fy-act>` | A clickable label, styled by the `action` pair or the `md.action` role. The id holds letters, digits and `_-.:/`, 1 to 63 bytes; a tag with another id is ignored. |
 | `<fy-role name="ROLE">text</fy-role>` | Text in a role of the palette. Without a palette, or without the role, the text is plain. |
 | `<fy-glyph name="NAME" fallback="TEXT"/>` | A glyph of the palette, in the form that `FYMD_PF_ASCII` selects, else the fallback text. |
