@@ -405,6 +405,181 @@ test_palette(void)
 }
 #endif
 
+
+/* A slot renderer that draws "x y" and records what it was asked. */
+static char slot_last_id[64];
+static int slot_last_width, slot_last_height, slot_nested_rc = 0;
+
+static int
+slot_text(void *userdata, const char *id, int width, int height,
+          enum fymd_block_flags flags, fymd_block_emit_fn emit, void *emit_ctx)
+{
+    const char *text = (const char *) userdata;
+
+    (void) flags;
+    snprintf(slot_last_id, sizeof(slot_last_id), "%s", id);
+    slot_last_width = width;
+    slot_last_height = height;
+    emit(emit_ctx, text, strlen(text));
+    return 0;
+}
+
+/* A slot renderer that renders Markdown with a renderer of its own. */
+static int
+slot_nested(void *userdata, const char *id, int width, int height,
+            enum fymd_block_flags flags, fymd_block_emit_fn emit, void *emit_ctx)
+{
+    struct fymd_renderer *outer = (struct fymd_renderer *) userdata;
+    struct fymd_renderer *inner;
+    char *out = NULL;
+    size_t len = 0;
+
+    (void) id;
+    (void) height;
+    (void) flags;
+    /* the calling renderer does not render while it renders */
+    slot_nested_rc = fymd_render(outer, "x", 1, &out, &len);
+    fymd_free(out);
+    out = NULL;
+    inner = renderer(1, width + 4, 0);
+    if(inner == NULL || fymd_render(inner, "**nested** body\n\nsecond\n", 24,
+                                    &out, &len) != 0) {
+        fymd_renderer_destroy(inner);
+        return -1;
+    }
+    while(len > 0 && out[len - 1] == '\n')
+        len--;
+    emit(emit_ctx, out, len);
+    fymd_free(out);
+    fymd_renderer_destroy(inner);
+    return 0;
+}
+
+static const struct fymd_region *
+region_find(struct fymd_renderer *r, const char *id)
+{
+    const struct fymd_region *rg;
+    size_t count, i;
+
+    if(fymd_renderer_get_regions(r, &rg, &count) != 0)
+        return NULL;
+    for(i = 0; i < count; i++)
+        if(!strcmp(rg[i].id, id))
+            return &rg[i];
+    return NULL;
+}
+
+static void
+test_slots(void)
+{
+    const struct fymd_region *rg;
+    struct fymd_renderer *r;
+    char buf[512];
+    char *out;
+    int top, bottom;
+
+    /* an inline slot reserves non-breaking cells and reports them */
+    r = renderer(1, 40, 0);
+    out = render(r, "a <fy-slot id=\"spin\" width=\"3\"/> b\n");
+    rg = region_find(r, "spin");
+    CHECK(rg != NULL && rg->kind == FYMD_REGION_SLOT && rg->row == 0 &&
+          rg->col == 4 && rg->width == 3 && rg->height == 1);
+    CHECK(out != NULL && strstr(out, "a \xc2\xa0\xc2\xa0\xc2\xa0 b") != NULL);
+    if(rg == NULL || rg->col != 4)
+        dump("inline slot", out);
+    fymd_free(out);
+
+    /* drawn by the slot renderer: clipped to the slot, blanks kept together */
+    CHECK(fymd_renderer_set_slot_renderer(r, slot_text, (void *) "x yz") == 0);
+    out = render(r, "a <fy-slot id=\"s2\" width=\"3\"/> b\n");
+    CHECK(out != NULL && strstr(out, "a x\xc2\xa0y b") != NULL);
+    CHECK(!strcmp(slot_last_id, "s2") && slot_last_width == 3 &&
+          slot_last_height == 1);
+    if(out == NULL || strstr(out, "a x\xc2\xa0y b") == NULL)
+        dump("inline slot content", out);
+    fymd_free(out);
+    /* an escape takes no column of the slot */
+    CHECK(fymd_renderer_set_slot_renderer(r, slot_text,
+                                          (void *) "\033[1mabc\033[22mdef") == 0);
+    out = render(r, "a <fy-slot id=\"s3\" width=\"3\"/> b\n");
+    CHECK(out != NULL && strstr(out, "\033[1mabc") != NULL &&
+          strstr(out, "abcd") == NULL);
+    if(out == NULL || strstr(out, "\033[1mabc") == NULL)
+        dump("slot with escapes", out);
+    fymd_free(out);
+    out = render(r, "<fy-slot id=\"s4\" height=\"1\"/>\n");
+    CHECK(out != NULL && strstr(out, "\033[1mabc\033[22mdef") != NULL);
+    fymd_free(out);
+    CHECK(fymd_renderer_set_slot_renderer(r, NULL, NULL) == 0);
+
+    /* a block slot of 3 rows at the width of the page */
+    out = render(r, "top\n\n<fy-slot id=\"pane\" height=\"3\"/>\n\nbottom\n");
+    rg = region_find(r, "pane");
+    top = row_of(out, "top");
+    bottom = row_of(out, "bottom");
+    CHECK(rg != NULL && rg->kind == FYMD_REGION_SLOT && rg->col == 2 &&
+          rg->width == 36 && rg->height == 3);
+    CHECK(rg != NULL && (int) rg->row > top && bottom >= (int) rg->row + 3);
+    if(rg == NULL || rg->height != 3 || bottom < (int) rg->row + 3)
+        dump("block slot", out);
+    fymd_free(out);
+
+    /* its rows come from a component that renders Markdown recursively */
+    CHECK(fymd_renderer_set_slot_renderer(r, slot_nested, r) == 0);
+    out = render(r, "top\n\n<fy-slot id=\"nest\"/>\n\nbottom\n");
+    rg = region_find(r, "nest");
+    CHECK(slot_nested_rc == -1);
+    CHECK(out != NULL && strstr(out, "nested body") != NULL &&
+          strstr(out, "second") != NULL);
+    CHECK(rg != NULL && rg->height >= 3 &&
+          row_of(out, "nested") >= (int) rg->row &&
+          row_of(out, "second") < (int) rg->row + rg->height &&
+          row_of(out, "bottom") >= (int) rg->row + rg->height);
+    if(rg == NULL || rg->height < 3)
+        dump("nested slot", out);
+    fymd_free(out);
+    CHECK(fymd_renderer_set_slot_renderer(r, NULL, NULL) == 0);
+
+    /* inside a column the slot has the width and the columns of its column */
+    out = render(r,
+        "<fy-columns widths=\"10,*\" gap=\"2\">\n"
+        "<fy-col>\n\nleft\n\n</fy-col>\n"
+        "<fy-col>\n\n<fy-slot id=\"side\" height=\"2\"/>\n\n</fy-col>\n"
+        "</fy-columns>\n");
+    rg = region_find(r, "side");
+    CHECK(rg != NULL && rg->col == 14 && rg->width == 24 && rg->height == 2);
+    if(rg == NULL || rg->col != 14)
+        dump("slot in a column", out);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+
+    /* an elastic slot takes the rows the page leaves over */
+    r = renderer(1, 40, 12);
+    out = render(r, "top\n\n<fy-slot id=\"body\" height=\"*\"/>\n\n"
+                    "<fy-act id=\"quit\">foot</fy-act>\n");
+    rg = region_find(r, "body");
+    top = row_of(out, "top");
+    bottom = row_of(out, "foot");
+    CHECK(rg != NULL && rg->kind == FYMD_REGION_SLOT && rg->col == 2 &&
+          rg->width == 36 && rg->height >= 6);
+    CHECK(rg != NULL && (int) rg->row > top &&
+          (int) rg->row + rg->height <= bottom && bottom >= 10);
+    rg = region_find(r, "quit");
+    CHECK(rg != NULL && (int) rg->row == bottom);
+    if(bottom < 10)
+        dump("elastic slot", out);
+    (void) buf;
+    fymd_free(out);
+
+    /* without a height an elastic slot is one row */
+    fymd_renderer_set_height(r, 0);
+    out = render(r, "top\n\n<fy-slot id=\"body\" height=\"*\"/>\n\nfoot\n");
+    rg = region_find(r, "body");
+    CHECK(rg != NULL && rg->height == 1);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+}
+
 int
 main(void)
 {
@@ -414,6 +589,7 @@ main(void)
     test_role_glyph();
     test_columns();
     test_vertical();
+    test_slots();
 #ifdef FYMD_TEST_PALETTE
     test_palette();
 #endif

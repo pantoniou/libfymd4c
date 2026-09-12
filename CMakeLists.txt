@@ -257,6 +257,14 @@ if (BUILD_FYMD4C_EXECUTABLE)
         set_tests_properties(ui-demo PROPERTIES
             PASS_REGULAR_EXPRESSION "region cmd:quit row=2[0-9]")
 
+        # A slot rendered by a nested renderer: its region is reported and
+        # the nested label is placed at the position of the slot.
+        add_test(NAME ui-demo-slots
+            COMMAND "$<TARGET_FILE:fymd-ui>" --color=off --width=60 --height=24
+                    --regions)
+        set_tests_properties(ui-demo-slots PROPERTIES
+            PASS_REGULAR_EXPRESSION "region preview row=[0-9]+ col=2 width=56 height=1 kind=slot.*region diff:foo.c row=[0-9]+ col=[0-9]+ width=4 height=1 kind=act slot=preview")
+
         if(MD4C_WITH_FYPALETTE)
             add_executable(palette-api-test test/palette-api-test.c)
             target_link_libraries(palette-api-test PRIVATE
