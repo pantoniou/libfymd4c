@@ -233,6 +233,7 @@ Left column.
 | `<fy-columns widths="..." gap="N" min="...">` | Blocks side by side. Each width is a number of columns, a percentage of the width, or a weighted share of the rest: `*` is one share and `3*` three. `min` is the least width of a column that is not fixed: one value for all of them, or a list. The gap defaults to 2 columns and the widths to `*,*`. Each `<fy-col>` renders at the width of its column, tables included, and the columns are joined row by row. A stream renders the whole column block at one time. |
 | `<fy-vfill weight="N" min="M"/>` | Flexible blank rows: a share of the rows that the page leaves over, by weight (1 when not given), and at least `min` rows. |
 | `<fy-scroll anchor="top\|bottom">` ... `</fy-scroll>` | A body that gives up rows when the page is too tall: the first rows for `bottom`, the last rows for `top`. |
+| `<fy-drop order="N">` ... `</fy-drop>` | A body that goes whole when the page is too tall, before a scroll body gives up rows. The lowest order goes first, and of equal orders the later body; the order defaults to 0. A body without its close is not a body, and bodies do not nest. A region in a dropped body is not reported, and an elastic slot there has a height of 0. |
 | `<fy-slot id="ID" height="N\|N*" min="M"/>` | Rows that another component draws, at the width of the page or of the column (see [Slots](#slots)). |
 
 #### Weights and minimums
@@ -242,6 +243,9 @@ percent sizes leave: `widths="20,2*,*"` gives the second column two thirds of
 the rest and the third column one third. Weights never add up to more than
 the space, where percentages can. A share is rounded by the largest remainders,
 so the shares fill the space exactly.
+
+A page that is too tall first loses its `fy-drop` bodies, in order, and its
+scroll bodies give up rows only for what is still over.
 
 A minimum holds a part that its share would make too small. The part takes its
 minimum, and the other weighted parts share what is left. The minimum rows of a

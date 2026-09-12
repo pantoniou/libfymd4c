@@ -338,6 +338,9 @@ int fymd_render_with_margins(struct fymd_renderer *r,
  *   <fy-vfill/>                  flexible blank rows, with a height
  *   <fy-scroll anchor="top|bottom"> ... </fy-scroll>
  *                                a body that gives up rows, with a height
+ *   <fy-drop order="N"> ... </fy-drop>
+ *                                a body that goes whole, lowest order first,
+ *                                when the page is too tall
  *   <fy-slot id="ID" height="N|*"/>
  *                                rows that another component draws, at the
  *                                width of the page or of the column
