@@ -218,10 +218,25 @@ Left column.
 
 | tag | effect |
 |---|---|
-| `<fy-columns widths="..." gap="N">` | Blocks side by side. Each width is a number of columns, a percentage of the width, or `*` for an equal share of the rest. The gap defaults to 2 columns and the widths to `*,*`. Each `<fy-col>` renders at the width of its column, tables included, and the columns are joined row by row. A stream renders the whole column block at one time. |
-| `<fy-vfill/>` | Flexible blank rows: the rows that the page leaves over. |
+| `<fy-columns widths="..." gap="N" min="...">` | Blocks side by side. Each width is a number of columns, a percentage of the width, or a weighted share of the rest: `*` is one share and `3*` three. `min` is the least width of a column that is not fixed: one value for all of them, or a list. The gap defaults to 2 columns and the widths to `*,*`. Each `<fy-col>` renders at the width of its column, tables included, and the columns are joined row by row. A stream renders the whole column block at one time. |
+| `<fy-vfill weight="N" min="M"/>` | Flexible blank rows: a share of the rows that the page leaves over, by weight (1 when not given), and at least `min` rows. |
 | `<fy-scroll anchor="top\|bottom">` ... `</fy-scroll>` | A body that gives up rows when the page is too tall: the first rows for `bottom`, the last rows for `top`. |
-| `<fy-slot id="ID" height="N\|*"/>` | Rows that another component draws, at the width of the page or of the column (see [Slots](#slots)). |
+| `<fy-slot id="ID" height="N\|N*" min="M"/>` | Rows that another component draws, at the width of the page or of the column (see [Slots](#slots)). |
+
+#### Weights and minimums
+
+A weighted size (`*`, `N*`) takes a share of the space that the fixed and the
+percent sizes leave: `widths="20,2*,*"` gives the second column two thirds of
+the rest and the third column one third. Weights never add up to more than
+the space, where percentages can. A share is rounded by the largest remainders,
+so the shares fill the space exactly.
+
+A minimum holds a part that its share would make too small. The part takes its
+minimum, and the other weighted parts share what is left. The minimum rows of a
+vfill and of an elastic slot are rows that the page must hold: when the page is
+full, a scroll body gives up rows for them, and a page that has no more rows to
+give is taller than its height. Without a page height, an elastic slot has its
+minimum rows, or one row.
 
 The vertical tags need a page height:
 `fymd_renderer_set_height(r, rows)`. Without a height, and in a stream, they do
@@ -244,8 +259,9 @@ A slot is a placeholder: the layout gives it a position and a size, and
 another component draws it. An inline slot is `width` cells of a row. A block
 slot is rows at the width that the page, or its column, has at that point; it
 has `height` rows, or the rows that its component draws when it has no height.
-`height="*"` makes the slot elastic: with a page height it takes the rows that
-the page leaves over, like `<fy-vfill/>`.
+`height="*"` makes the slot elastic: with a page height it takes a share of the
+rows that the page leaves over, like `<fy-vfill/>`; `height="3*"` takes three
+shares, and `min` holds its least rows.
 
 A component draws a slot in one of two ways:
 
