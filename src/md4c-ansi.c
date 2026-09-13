@@ -270,6 +270,7 @@ struct MD_ANSI_tag {
     char* html_buf;                 /* the text of the open HTML block */
     MD_SIZE html_size, html_cap;
     int ui_col_depth;               /* inside a capturing fy-col */
+    int ui_tight;                   /* inside fy-tight: no block separators */
     MD_ANSI_COLUMNS* ui_cols;       /* the open fy-columns, or NULL */
 };
 
@@ -890,6 +891,9 @@ render_newline(MD_ANSI* r)
 static void
 render_separator(MD_ANSI* r)
 {
+    /* A page stacks the blocks of an fy-tight on adjacent rows. */
+    if(r->ui_tight > 0)
+        return;
     if(r->quote_depth > 0) {
         int i, saved = r->wrap_suspend;
         r->wrap_suspend = 1;             /* emit the bars straight to output */
@@ -3644,7 +3648,7 @@ ui_slot_block(MD_ANSI* r, const MD_UI_TAG* t)
     r->need_newline = 1;
 }
 
-/* The fy-* tags of an HTML block: columns, vfill, scroll, drop and slot. */
+/* The fy-* tags of an HTML block: columns, vfill, scroll, drop, tight and slot. */
 static void
 ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
 {
@@ -3715,6 +3719,11 @@ ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
                 v = md_ui_tag_attr(&t, "anchor", &vl);
                 ui_row_marker(r, "scroll", v, v ? vl : 0);
             }
+        } else if(md_ui_tag_is(&t, "tight")) {
+            if(!t.closing)
+                r->ui_tight++;
+            else if(r->ui_tight > 0)
+                r->ui_tight--;
         } else if(md_ui_tag_is(&t, "drop")) {
             if(t.closing) {
                 ui_row_marker(r, "/drop", NULL, 0);
