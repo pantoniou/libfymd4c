@@ -911,6 +911,197 @@ test_tight(void)
     fymd_renderer_destroy(r);
 }
 
+/* The column where @needle starts on its row of @out, or -1. */
+static int
+col_of(const char *out, const char *needle)
+{
+    const char *hit = out ? strstr(out, needle) : NULL, *p, *start;
+    int n = 0;
+
+    if(hit == NULL)
+        return -1;
+    for(start = hit; start > out && start[-1] != '\n'; start--)
+        ;
+    for(p = start; p < hit; p++)
+        n += ((unsigned char) *p & 0xc0) != 0x80;
+    return n;
+}
+
+static void
+test_grid(void)
+{
+    const struct fymd_region *rg;
+    struct fymd_renderer *r;
+    char *out;
+    int top;
+
+    r = renderer(1, 40, 0);
+
+    /* cells stand side by side in their columns */
+    out = render(r,
+        "<fy-grid rows=\"1\" cols=\"10,*\" gap=\"1\">\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\nAAA\n\n</fy-cell>\n"
+        "<fy-cell row=\"0\" col=\"1\">\n\nBBB\n\n</fy-cell>\n"
+        "</fy-grid>\n");
+    CHECK(row_of(out, "AAA") >= 0 && row_of(out, "AAA") == row_of(out, "BBB"));
+    CHECK(col_of(out, "BBB") == col_of(out, "AAA") + 11);
+    if(col_of(out, "BBB") != col_of(out, "AAA") + 11)
+        dump("grid columns", out);
+    fymd_free(out);
+
+    /* a cell spans two rows beside two cells; a slot in it keeps its region */
+    out = render(r,
+        "<fy-grid rows=\"2,2\" cols=\"10,*\" gap=\"1\">\n"
+        "<fy-cell row=\"0\" col=\"0\" rowspan=\"2\">\n\n"
+        "<fy-slot id=\"tall\" height=\"4\"/>\n\n</fy-cell>\n"
+        "<fy-cell row=\"0\" col=\"1\">\n\nTOP\n\n</fy-cell>\n"
+        "<fy-cell row=\"1\" col=\"1\">\n\nBOT\n\n</fy-cell>\n"
+        "</fy-grid>\n");
+    top = row_of(out, "TOP");
+    rg = region_find(r, "tall");
+    CHECK(top >= 0 && row_of(out, "BOT") == top + 2);
+    CHECK(rg != NULL && (int) rg->row == top && rg->height == 4 &&
+          rg->width == 10);
+    CHECK(rg != NULL && col_of(out, "TOP") == rg->col + 11);
+    if(rg == NULL || row_of(out, "BOT") != top + 2)
+        dump("grid row span", out);
+    fymd_free(out);
+
+    /* a spanning cell gives each row its next rows, each one time */
+    out = render(r,
+        "<fy-grid rows=\"2,2\" cols=\"10,*\" gap=\"1\">\n"
+        "<fy-cell row=\"0\" col=\"0\" rowspan=\"2\">\n\n"
+        "* L1\n* L2\n* L3\n* L4\n\n</fy-cell>\n"
+        "<fy-cell row=\"0\" col=\"1\">\n\nTOP\n\n</fy-cell>\n"
+        "</fy-grid>\n");
+    top = row_of(out, "L1");
+    CHECK(top >= 0 && row_of(out, "L3") == top + 2);
+    CHECK(out != NULL && strstr(out, "L1") &&
+          strstr(strstr(out, "L1") + 2, "L1") == NULL);
+    if(row_of(out, "L3") != top + 2)
+        dump("grid span rows", out);
+    fymd_free(out);
+
+    /* a cell spans two columns: its width includes the gap */
+    out = render(r,
+        "<fy-grid rows=\"3,1\" cols=\"10,10\" gap=\"1\">\n"
+        "<fy-cell row=\"0\" col=\"0\" colspan=\"2\">\n\n"
+        "<fy-slot id=\"wide\" height=\"1\"/>\n\nWIDETEXT\n\n</fy-cell>\n"
+        "<fy-cell row=\"1\" col=\"0\">\n\nXXX\n\n</fy-cell>\n"
+        "<fy-cell row=\"1\" col=\"1\">\n\nYYY\n\n</fy-cell>\n"
+        "</fy-grid>\n");
+    rg = region_find(r, "wide");
+    CHECK(rg != NULL && rg->width == 21);
+    /* the spanning cell is drawn one time, not once for each column */
+    CHECK(out != NULL && strstr(out, "WIDETEXT") &&
+          strstr(strstr(out, "WIDETEXT") + 8, "WIDETEXT") == NULL);
+    CHECK(rg != NULL && row_of(out, "XXX") == (int) rg->row + 3);
+    CHECK(col_of(out, "YYY") == col_of(out, "XXX") + 11);
+    if(rg == NULL || rg->width != 21)
+        dump("grid column span", out);
+    fymd_free(out);
+
+    /* a fit row takes the rows of its tallest cell */
+    out = render(r,
+        "<fy-grid rows=\"fit,fit\" cols=\"*,*\" gap=\"1\">\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\n* one\n* two\n* three\n\n</fy-cell>\n"
+        "<fy-cell row=\"0\" col=\"1\">\n\nshort\n\n</fy-cell>\n"
+        "<fy-cell row=\"1\" col=\"0\">\n\nNEXT\n\n</fy-cell>\n"
+        "</fy-grid>\n");
+    CHECK(row_of(out, "NEXT") == row_of(out, "one") + 3);
+    CHECK(row_of(out, "short") == row_of(out, "one"));
+    if(row_of(out, "NEXT") != row_of(out, "one") + 3)
+        dump("grid fit", out);
+    fymd_free(out);
+
+    /* a shared row takes what the grid height leaves */
+    out = render(r,
+        "<fy-grid rows=\"2,*\" cols=\"*\" height=\"10\">\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\nHEAD\n\n</fy-cell>\n"
+        "<fy-cell row=\"1\" col=\"0\">\n\n<fy-slot id=\"rest\" height=\"*\"/>\n\n"
+        "</fy-cell>\n"
+        "</fy-grid>\n\nAFTER\n");
+    rg = region_find(r, "rest");
+    top = row_of(out, "HEAD");
+    CHECK(rg != NULL && (int) rg->row == top + 2);
+    CHECK(row_of(out, "AFTER") >= top + 10);
+    if(rg == NULL || row_of(out, "AFTER") < top + 10)
+        dump("grid share", out);
+    fymd_free(out);
+
+    /* content taller than its cell is cut */
+    out = render(r,
+        "<fy-grid rows=\"1\" cols=\"*\">\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\n* first\n* second\n* third\n\n</fy-cell>\n"
+        "</fy-grid>\n\nAFTER\n");
+    CHECK(out != NULL && strstr(out, "first") && !strstr(out, "second"));
+    CHECK(row_of(out, "AFTER") > row_of(out, "first"));
+    fymd_free(out);
+
+    /* a cell out of the grid, over another, or with no place is not drawn */
+    out = render(r,
+        "<fy-grid rows=\"1\" cols=\"*,*\">\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\nKEPT\n\n</fy-cell>\n"
+        "<fy-cell row=\"4\" col=\"0\">\n\nOUTSIDE\n\n</fy-cell>\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\nOVER\n\n</fy-cell>\n"
+        "<fy-cell>\n\nNOWHERE\n\n</fy-cell>\n"
+        "</fy-grid>\n");
+    CHECK(out != NULL && strstr(out, "KEPT") && !strstr(out, "OUTSIDE") &&
+          !strstr(out, "OVER") && !strstr(out, "NOWHERE"));
+    if(out == NULL || strstr(out, "OVER") || strstr(out, "NOWHERE"))
+        dump("grid invalid cells", out);
+    fymd_free(out);
+
+    /* a cell over another does not size the row it is not drawn in */
+    out = render(r,
+        "<fy-grid rows=\"fit\" cols=\"*\">\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\nKEPT\n\n</fy-cell>\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\n* a\n* b\n* c\n\n</fy-cell>\n"
+        "</fy-grid>\n\nAFTER\n");
+    CHECK(row_of(out, "AFTER") == row_of(out, "KEPT") + 2);
+    if(row_of(out, "AFTER") != row_of(out, "KEPT") + 2)
+        dump("grid overlap height", out);
+    fymd_free(out);
+
+    /* a separator stands between two columns on every row of the grid */
+    out = render(r,
+        "<fy-grid rows=\"2,1\" cols=\"10,*\" gap=\"3\" sep=\" | \">\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\nAAA\n\n</fy-cell>\n"
+        "<fy-cell row=\"0\" col=\"1\">\n\nBBB\n\n</fy-cell>\n"
+        "<fy-cell row=\"1\" col=\"0\" colspan=\"2\">\n\nWIDE\n\n</fy-cell>\n"
+        "</fy-grid>\n");
+    top = row_of(out, "AAA");
+    {
+        char line[256];
+        int sepcol = col_of(out, "AAA") + 10 + 1;
+
+        CHECK(top >= 0 && col_of(out, "BBB") == col_of(out, "AAA") + 13);
+        row(out, top, line, sizeof(line));
+        CHECK((int) strlen(line) > sepcol && line[sepcol] == '|');
+        row(out, top + 1, line, sizeof(line));
+        CHECK((int) strlen(line) > sepcol && line[sepcol] == '|');
+        /* a cell that spans the columns covers the separator */
+        CHECK(row_of(out, "WIDE") == top + 2);
+        row(out, top + 2, line, sizeof(line));
+        CHECK(strchr(line, '|') == NULL);
+        if(top < 0 || strchr(line, '|') != NULL)
+            dump("grid separator", out);
+    }
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+
+    /* without UI Markdown the cells are plain blocks */
+    r = renderer(0, 40, 0);
+    out = render(r,
+        "<fy-grid rows=\"1\" cols=\"*,*\">\n"
+        "<fy-cell row=\"0\" col=\"0\">\n\nAAA\n\n</fy-cell>\n"
+        "<fy-cell row=\"0\" col=\"1\">\n\nBBB\n\n</fy-cell>\n"
+        "</fy-grid>\n");
+    CHECK(row_of(out, "BBB") > row_of(out, "AAA"));
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+}
+
 int
 main(void)
 {
@@ -924,6 +1115,7 @@ main(void)
     test_weights();
     test_drop();
     test_tight();
+    test_grid();
 #ifdef FYMD_TEST_PALETTE
     test_palette();
 #endif
