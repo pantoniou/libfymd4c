@@ -338,6 +338,9 @@ int fymd_render_with_margins(struct fymd_renderer *r,
  *   <fy-vfill/>                  flexible blank rows, with a height
  *   <fy-scroll anchor="top|bottom"> ... </fy-scroll>
  *                                a body that gives up rows, with a height
+ *   <fy-grid rows="2,fit,*" cols="20,*" gap="3" sep=" | " height="N">
+ *     <fy-cell row="0" col="0" rowspan="2" colspan="1"> ... </fy-cell>
+ *   </fy-grid>                   cells in explicit tracks, with spans
  *   <fy-tight> ... </fy-tight>
  *                                blocks on adjacent rows, with no blank row
  *                                between them
