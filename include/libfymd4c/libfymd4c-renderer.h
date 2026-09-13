@@ -338,6 +338,9 @@ int fymd_render_with_margins(struct fymd_renderer *r,
  *   <fy-vfill/>                  flexible blank rows, with a height
  *   <fy-scroll anchor="top|bottom"> ... </fy-scroll>
  *                                a body that gives up rows, with a height
+ *   <fy-tight> ... </fy-tight>
+ *                                blocks on adjacent rows, with no blank row
+ *                                between them
  *   <fy-drop order="N"> ... </fy-drop>
  *                                a body that goes whole, lowest order first,
  *                                when the page is too tall
