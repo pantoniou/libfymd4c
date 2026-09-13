@@ -33,6 +33,11 @@ static const struct heal_case cases[] = {
     /* globs and products are not dangling emphasis openers */
     { "pmccabe -v src/*.c",  "pmccabe -v src/*.c"  },
     { "a*b times",           "a*b times"           },
+    /* a marker inside an HTML tag is an attribute, not emphasis */
+    { "<fy-grid rows=\"2\" cols=\"*\">\n",
+      "<fy-grid rows=\"2\" cols=\"*\">\n" },
+    { "a <span title=\"*\">b</span> c",
+      "a <span title=\"*\">b</span> c" },
     /* already balanced: left alone */
     { "all *done* here",     "all *done* here"     },
     /* the closer goes where it can close: past the last newline it would
