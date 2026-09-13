@@ -854,6 +854,63 @@ test_drop(void)
     fymd_renderer_destroy(r);
 }
 
+static void
+test_tight(void)
+{
+    const struct fymd_region *rg;
+    struct fymd_renderer *r;
+    char *out;
+
+    r = renderer(1, 40, 0);
+
+    /* blocks inside fy-tight stand on adjacent rows; after it they do not */
+    out = render(r, "<fy-tight>\n\nhead\n\n<fy-slot id=\"p\" height=\"2\"/>\n\n"
+                    "foot\n\n</fy-tight>\n\nafter\n");
+    rg = region_find(r, "p");
+    CHECK(row_of(out, "head") == 0);
+    CHECK(rg != NULL && rg->row == 1 && rg->height == 2);
+    CHECK(row_of(out, "foot") == 3);
+    CHECK(row_of(out, "after") == 5);
+    if(row_of(out, "foot") != 3 || row_of(out, "after") != 5)
+        dump("tight", out);
+    fymd_free(out);
+
+    /* the same blocks without it are separated */
+    out = render(r, "head\n\n<fy-slot id=\"p\" height=\"2\"/>\n\nfoot\n");
+    CHECK(row_of(out, "foot") > 3);
+    fymd_free(out);
+
+    /* an unclosed fy-tight runs to the end */
+    out = render(r, "<fy-tight>\n\naaa\n\nbbb\n");
+    CHECK(row_of(out, "bbb") == 1);
+    fymd_free(out);
+
+    /* a close without an open is ignored, and a later open still holds */
+    out = render(r, "aaa\n\n</fy-tight>\n\nbbb\n");
+    CHECK(row_of(out, "bbb") == 2);
+    fymd_free(out);
+    out = render(r, "aaa\n\n</fy-tight>\n\n<fy-tight>\n\nbbb\n\nccc\n");
+    CHECK(row_of(out, "ccc") == row_of(out, "bbb") + 1);
+    fymd_free(out);
+
+    /* a drop inside it takes no row of its own */
+    fymd_renderer_set_height(r, 1);
+    out = render(r, "<fy-tight>\n\n<fy-drop>\n\nxxx\n\n</fy-drop>\n\nyyy\n");
+    CHECK(out != NULL && !strstr(out, "xxx") && strstr(out, "yyy") &&
+          rows(out) <= 1);
+    if(out == NULL || rows(out) > 1)
+        dump("tight drop", out);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+
+    /* without UI Markdown the blocks keep their separators */
+    r = renderer(0, 40, 0);
+    out = render(r, "<fy-tight>\n\nhead\n\nfoot\n");
+    CHECK(row_of(out, "foot") > 1);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+}
+
 int
 main(void)
 {
@@ -866,6 +923,7 @@ main(void)
     test_slots();
     test_weights();
     test_drop();
+    test_tight();
 #ifdef FYMD_TEST_PALETTE
     test_palette();
 #endif
