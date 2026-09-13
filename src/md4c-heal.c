@@ -675,6 +675,9 @@ count_single_asterisks(const char* text, unsigned size)
 
             if(prev == '\\') continue;
             if(in_math_block(text, size, i)) continue;
+            /* An attribute or a URL is not emphasis. */
+            if(in_link_url(text, i)) continue;
+            if(in_html_tag(text, i)) continue;
 
             /* Special handling for *** sequences */
             if(prev != '*' && next == '*') {
