@@ -142,7 +142,8 @@ typedef struct MD_ANSI_TABLE {
 
 typedef struct MD_ANSI_tag MD_ANSI;
 /* An open fy-columns block: the widths and the output of each column. */
-#define MD_UI_COLS_MAX 8
+#define MD_UI_COLS_MAX 32
+#define MD_UI_GRID_MAX 16      /* tracks of a grid in each direction */
 typedef struct MD_ANSI_COLUMNS {
     int n;
     int cur;
@@ -164,6 +165,27 @@ typedef struct MD_ANSI_COLUMNS {
     int saved_row_open;
     MD_ANSI_MARGIN_FN saved_margin;
 } MD_ANSI_COLUMNS;
+
+enum { GRID_ROW_FIXED, GRID_ROW_FIT, GRID_ROW_SHARE };
+
+/* An fy-grid: its tracks and the place of each captured cell. The cells are
+ * captured by the columns engine, one capture for each cell. */
+typedef struct MD_ANSI_GRID {
+    int nrows;
+    int ncols;
+    int gap;
+    int height;                         /* rows for the shared rows; 0 none */
+    char sep[32];                       /* drawn in the gap between columns */
+    size_t sep_len;
+    int row_kind[MD_UI_GRID_MAX];
+    int row_val[MD_UI_GRID_MAX];
+    int col_width[MD_UI_GRID_MAX];
+    int cell_row[MD_UI_COLS_MAX];
+    int cell_col[MD_UI_COLS_MAX];
+    int cell_rs[MD_UI_COLS_MAX];
+    int cell_cs[MD_UI_COLS_MAX];
+    int cell_ok[MD_UI_COLS_MAX];
+} MD_ANSI_GRID;
 
 #define MD_UI_ROLE_MAX 8
 
@@ -272,6 +294,7 @@ struct MD_ANSI_tag {
     int ui_col_depth;               /* inside a capturing fy-col */
     int ui_tight;                   /* inside fy-tight: no block separators */
     MD_ANSI_COLUMNS* ui_cols;       /* the open fy-columns, or NULL */
+    MD_ANSI_GRID* ui_grid;          /* the open fy-grid, or NULL */
 };
 
 
@@ -3315,6 +3338,46 @@ ui_row_blank(const char* p, MD_SIZE n)
     return 1;
 }
 
+/* The rows of capture @j without its leading and trailing blank rows: from
+ * *@firstp to *@lastp, *@nrowsp of them. */
+static void
+ui_col_rows(const MD_ANSI_COLUMNS* c, int j, MD_SIZE* firstp, MD_SIZE* lastp,
+            int* nrowsp)
+{
+    const char* b = c->buf[j];
+    MD_SIZE size = j < c->cur ? c->size[j] : 0;
+    MD_SIZE pos, end, first = 0, last = 0;
+    const char* nl;
+    int n = 0;
+
+    for(pos = 0; pos < size; pos = end + 1) {
+        nl = (const char*) memchr(b + pos, '\n', size - pos);
+        end = nl ? (MD_SIZE)(nl - b) : size;
+        if(ui_row_blank(b + pos, end - pos)) {
+            if(n == 0)
+                first = end + 1;
+            if(!nl)
+                break;
+            continue;
+        }
+        n = 1;
+        last = nl ? end + 1 : end;
+        if(!nl)
+            break;
+    }
+    n = 0;
+    for(pos = first; pos < last; pos = end + 1) {
+        nl = (const char*) memchr(b + pos, '\n', last - pos);
+        end = nl ? (MD_SIZE)(nl - b) : last;
+        n++;
+        if(!nl)
+            break;
+    }
+    *firstp = first;
+    *lastp = last;
+    *nrowsp = n;
+}
+
 /* Place the captured columns side by side, row by row. */
 static void
 ui_columns_emit(MD_ANSI* r)
@@ -3327,37 +3390,9 @@ ui_columns_emit(MD_ANSI* r)
     MD_SIZE pos, end, rs;
     const char* nl;
 
-    /* the rows of each column without its leading and trailing blank rows */
     for(j = 0; j < c->n; j++) {
-        const char* b = c->buf[j];
-        MD_SIZE size = j < c->cur ? c->size[j] : 0;
-        first[j] = 0;
-        last[j] = 0;
-        nrows[j] = 0;
-        for(pos = 0; pos < size; pos = end + 1) {
-            nl = (const char*) memchr(b + pos, '\n', size - pos);
-            end = nl ? (MD_SIZE)(nl - b) : size;
-            if(ui_row_blank(b + pos, end - pos)) {
-                if(nrows[j] == 0)
-                    first[j] = end + 1;
-                if(!nl)
-                    break;
-                continue;
-            }
-            nrows[j] = 1;
-            last[j] = nl ? end + 1 : end;
-            if(!nl)
-                break;
-        }
-        nrows[j] = 0;
-        for(pos = first[j]; pos < last[j]; pos = end + 1) {
-            nl = (const char*) memchr(b + pos, '\n', last[j] - pos);
-            end = nl ? (MD_SIZE)(nl - b) : last[j];
-            nrows[j]++;
-            if(!nl)
-                break;
-        }
-        rows_p[j] = b;
+        ui_col_rows(c, j, &first[j], &last[j], &nrows[j]);
+        rows_p[j] = c->buf[j];
         rows_n[j] = first[j];
         if(nrows[j] > height)
             height = nrows[j];
@@ -3648,7 +3683,286 @@ ui_slot_block(MD_ANSI* r, const MD_UI_TAG* t)
     r->need_newline = 1;
 }
 
-/* The fy-* tags of an HTML block: columns, vfill, scroll, drop, tight and slot. */
+/* An integer attribute of @t, or @dflt when it is not there; *@present tells
+ * which. */
+static int
+ui_attr_int(const MD_UI_TAG* t, const char* name, int dflt, int* present)
+{
+    const char* v;
+    size_t vl;
+    int n = 0, any = 0;
+
+    v = md_ui_tag_attr(t, name, &vl);
+    if(present != NULL)
+        *present = 0;
+    if(v == NULL)
+        return dflt;
+    for(; vl > 0 && *v >= '0' && *v <= '9'; v++, vl--) {
+        if(n < 100000)
+            n = n * 10 + (*v - '0');
+        any = 1;
+    }
+    if(!any || vl > 0)
+        return dflt;
+    if(present != NULL)
+        *present = 1;
+    return n;
+}
+
+static void
+ui_grid_free(MD_ANSI* r)
+{
+    ui_columns_free(r);
+    free(r->ui_grid);
+    r->ui_grid = NULL;
+}
+
+/* Open an fy-grid: its tracks, and the columns engine that captures its cells. */
+static int
+ui_grid_open(MD_ANSI* r, const MD_UI_TAG* t)
+{
+    MD_ANSI_GRID* g;
+    const char* v;
+    size_t vl, i, start;
+    int avail, j, kind, val;
+
+    g = (MD_ANSI_GRID*) calloc(1, sizeof(*g));
+    r->ui_cols = (MD_ANSI_COLUMNS*) calloc(1, sizeof(*r->ui_cols));
+    r->ui_grid = g;
+    if(g == NULL || r->ui_cols == NULL)
+        return -1;
+    g->gap = ui_attr_int(t, "gap", 1, NULL);
+    g->height = ui_attr_int(t, "height", 0, NULL);
+    v = md_ui_tag_attr(t, "sep", &vl);
+    if(v != NULL && vl > 0) {
+        g->sep_len = vl < sizeof(g->sep) ? vl : sizeof(g->sep) - 1;
+        memcpy(g->sep, v, g->sep_len);
+    }
+    r->ui_cols->gap = g->gap;
+
+    avail = (r->wrap_cols > 0 ? r->wrap_cols : 80) - ansi_indent_width(r) -
+            DOC_MARGIN;
+    v = md_ui_tag_attr(t, "cols", &vl);
+    if(v == NULL) {
+        v = "*";
+        vl = 1;
+    }
+    if(ui_columns_widths(r->ui_cols, v, vl, NULL, 0, avail) != 0)
+        return -1;
+    g->ncols = r->ui_cols->n < MD_UI_GRID_MAX ? r->ui_cols->n : MD_UI_GRID_MAX;
+    for(j = 0; j < g->ncols; j++)
+        g->col_width[j] = r->ui_cols->width[j];
+    r->ui_cols->n = 0;
+
+    v = md_ui_tag_attr(t, "rows", &vl);
+    if(v == NULL) {
+        v = "fit";
+        vl = 3;
+    }
+    for(i = 0; i <= vl && g->nrows < MD_UI_GRID_MAX; i++) {
+        start = i;
+        while(i < vl && v[i] != ',')
+            i++;
+        while(start < i && v[start] == ' ')
+            start++;
+        if(i - start >= 3 && memcmp(v + start, "fit", 3) == 0) {
+            g->row_kind[g->nrows] = GRID_ROW_FIT;
+        } else {
+            ui_size_parse(v + start, i - start, &kind, &val);
+            if(kind == 2) {
+                g->row_kind[g->nrows] = GRID_ROW_SHARE;
+                g->row_val[g->nrows] = val;
+            } else if(kind == 0 && val > 0) {
+                g->row_kind[g->nrows] = GRID_ROW_FIXED;
+                g->row_val[g->nrows] = val;
+            } else {
+                g->row_kind[g->nrows] = GRID_ROW_FIT;
+            }
+        }
+        g->nrows++;
+    }
+    return g->nrows > 0 && g->ncols > 0 ? 0 : -1;
+}
+
+/* Capture an fy-cell at the width of the columns it spans. A cell out of the
+ * grid, over another cell, or without a place is captured and not drawn. */
+static void
+ui_grid_cell_begin(MD_ANSI* r, const MD_UI_TAG* t)
+{
+    MD_ANSI_GRID* g = r->ui_grid;
+    MD_ANSI_COLUMNS* c = r->ui_cols;
+    int j = c->cur, k, has_row, has_col, w, ok;
+    int row, col, rs, cs;
+
+    row = ui_attr_int(t, "row", 0, &has_row);
+    col = ui_attr_int(t, "col", 0, &has_col);
+    rs = ui_attr_int(t, "rowspan", 1, NULL);
+    cs = ui_attr_int(t, "colspan", 1, NULL);
+    if(rs < 1)
+        rs = 1;
+    if(cs < 1)
+        cs = 1;
+    ok = has_row && has_col && row + rs <= g->nrows && col + cs <= g->ncols;
+    for(k = 0; ok && k < j; k++)
+        if(g->cell_ok[k] &&
+           row < g->cell_row[k] + g->cell_rs[k] && g->cell_row[k] < row + rs &&
+           col < g->cell_col[k] + g->cell_cs[k] && g->cell_col[k] < col + cs)
+            ok = 0;
+    g->cell_row[j] = row;
+    g->cell_col[j] = col;
+    g->cell_rs[j] = rs;
+    g->cell_cs[j] = cs;
+    g->cell_ok[j] = ok;
+    for(k = 0, w = 0; ok && k < cs; k++)
+        w += g->col_width[col + k];
+    if(ok)
+        w += g->gap * (cs - 1);
+    c->width[j] = w > 0 ? w : 1;
+    if(c->n <= j)
+        c->n = j + 1;
+    ui_column_begin(r);
+}
+
+/* The gap before a column: the separator of the grid in its columns, or
+ * blanks. */
+static void
+ui_grid_gap(MD_ANSI* r, const MD_ANSI_GRID* g)
+{
+    MD_SIZE clip = 0;
+    int w = 0, pad;
+
+    if(g->sep_len > 0) {
+        clip = ui_clip_cols(g->sep, (MD_SIZE) g->sep_len, g->gap);
+        if(clip > 0) {
+            out_direct(r, g->sep, clip);
+            w = ansi_disp_width(g->sep, clip);
+            if(memchr(g->sep, 0x1b, clip) != NULL &&
+               !(r->flags & MD_ANSI_FLAG_NO_COLOR))
+                out_direct(r, "\x1b[0m", 4);
+        }
+    }
+    for(pad = w; pad < g->gap; pad++)
+        out_direct(r, " ", 1);
+}
+
+/* Place the captured cells in the grid, row by row. */
+static void
+ui_grid_emit(MD_ANSI* r)
+{
+    MD_ANSI_GRID* g = r->ui_grid;
+    MD_ANSI_COLUMNS* c = r->ui_cols;
+    MD_SIZE first[MD_UI_COLS_MAX], last[MD_UI_COLS_MAX];
+    int nrows[MD_UI_COLS_MAX];
+    int h[MD_UI_GRID_MAX], top[MD_UI_GRID_MAX];
+    int weight[MD_UI_GRID_MAX], share[MD_UI_GRID_MAX], idx[MD_UI_GRID_MAX];
+    int n = c->cur, j, gr, gc, k, line, used, nshare, span, w, pad, q, lastfit;
+    MD_SIZE pos, end, rs, clip;
+    const char* nl;
+
+    for(j = 0; j < n; j++)
+        ui_col_rows(c, j, &first[j], &last[j], &nrows[j]);
+
+    /* the rows of each track */
+    for(gr = 0; gr < g->nrows; gr++) {
+        h[gr] = g->row_kind[gr] == GRID_ROW_FIXED ? g->row_val[gr] : 0;
+        if(g->row_kind[gr] == GRID_ROW_FIXED)
+            continue;
+        for(j = 0; j < n; j++)
+            if(g->cell_ok[j] && g->cell_rs[j] == 1 && g->cell_row[j] == gr &&
+               nrows[j] > h[gr])
+                h[gr] = nrows[j];
+        if(h[gr] < 1)
+            h[gr] = 1;
+    }
+    /* a cell that spans rows grows the last fitted row it spans */
+    for(j = 0; j < n; j++) {
+        if(!g->cell_ok[j] || g->cell_rs[j] < 2)
+            continue;
+        for(k = 0, span = 0, lastfit = -1; k < g->cell_rs[j]; k++) {
+            span += h[g->cell_row[j] + k];
+            if(g->row_kind[g->cell_row[j] + k] == GRID_ROW_FIT)
+                lastfit = g->cell_row[j] + k;
+        }
+        if(lastfit >= 0 && nrows[j] > span)
+            h[lastfit] += nrows[j] - span;
+    }
+    /* the shared rows take what the height leaves */
+    for(gr = 0, used = 0, nshare = 0; gr < g->nrows; gr++) {
+        if(g->row_kind[gr] == GRID_ROW_SHARE && g->height > 0) {
+            idx[nshare] = gr;
+            weight[nshare] = g->row_val[gr] > 0 ? g->row_val[gr] : 1;
+            nshare++;
+        } else {
+            used += h[gr];
+        }
+    }
+    if(nshare > 0) {
+        md_ui_share(g->height > used ? g->height - used : 0, weight, NULL,
+                    nshare, share);
+        for(k = 0; k < nshare; k++)
+            h[idx[k]] = share[k] > 0 ? share[k] : 1;
+    }
+    for(gr = 0, used = 0; gr < g->nrows; gr++) {
+        top[gr] = used;
+        used += h[gr];
+    }
+
+    if(r->need_newline) {
+        render_separator(r);
+        r->need_newline = 0;
+    }
+    for(gr = 0; gr < g->nrows; gr++) {
+        for(k = 0; k < h[gr]; k++) {
+            render_indent(r);
+            for(gc = 0; gc < g->ncols; gc++) {
+                for(j = 0; j < n; j++)
+                    if(g->cell_ok[j] && g->cell_row[j] <= gr &&
+                       gr < g->cell_row[j] + g->cell_rs[j] &&
+                       g->cell_col[j] <= gc &&
+                       gc < g->cell_col[j] + g->cell_cs[j])
+                        break;
+                if(gc > 0)
+                    ui_grid_gap(r, g);
+                if(j == n) {
+                    if(gc + 1 < g->ncols)
+                        for(pad = 0; pad < g->col_width[gc]; pad++)
+                            out_direct(r, " ", 1);
+                    continue;
+                }
+                w = 0;
+                line = top[gr] - top[g->cell_row[j]] + k;
+                if(line < nrows[j]) {
+                    for(pos = first[j], q = 0; q < line; q++) {
+                        nl = (const char*) memchr(c->buf[j] + pos, '\n',
+                                                  last[j] - pos);
+                        pos = nl ? (MD_SIZE)(nl - c->buf[j]) + 1 : last[j];
+                    }
+                    nl = (const char*) memchr(c->buf[j] + pos, '\n',
+                                              last[j] - pos);
+                    end = nl ? (MD_SIZE)(nl - c->buf[j]) : last[j];
+                    rs = end - pos;
+                    clip = ui_clip_cols(c->buf[j] + pos, rs, c->width[j]);
+                    if(clip > 0) {
+                        out_direct(r, c->buf[j] + pos, clip);
+                        w = ansi_disp_width(c->buf[j] + pos, clip);
+                        if(memchr(c->buf[j] + pos, 0x1b, clip) != NULL &&
+                           !(r->flags & MD_ANSI_FLAG_NO_COLOR))
+                            out_direct(r, "\x1b[0m", 4);
+                    }
+                }
+                gc += g->cell_cs[j] - 1;
+                if(gc + 1 < g->ncols)
+                    for(pad = w; pad < c->width[j]; pad++)
+                        out_direct(r, " ", 1);
+            }
+            out_direct(r, "\n", 1);
+        }
+    }
+    r->need_newline = 1;
+}
+
+/* The fy-* tags of an HTML block: columns, grid, vfill, scroll, drop, tight
+ * and slot. */
 static void
 ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
 {
@@ -3661,7 +3975,27 @@ ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
     for(i = 0; i < size; i++) {
         if(text[i] != '<' || md_ui_tag_parse(text + i, size - i, &t) != 0)
             continue;
-        if(md_ui_tag_is(&t, "columns") && !t.closing) {
+        if(md_ui_tag_is(&t, "grid") && !t.closing) {
+            if(r->ui_cols != NULL || r->ui_col_depth)
+                goto next;
+            if(ui_grid_open(r, &t) != 0)
+                ui_grid_free(r);
+        } else if(md_ui_tag_is(&t, "grid") && t.closing) {
+            if(r->ui_grid == NULL)
+                goto next;
+            if(r->ui_cols->capturing)
+                ui_column_end(r);
+            ui_grid_emit(r);
+            ui_grid_free(r);
+        } else if(md_ui_tag_is(&t, "cell") && !t.closing) {
+            if(r->ui_grid == NULL || r->ui_cols->capturing ||
+               r->ui_cols->cur >= MD_UI_COLS_MAX)
+                goto next;
+            ui_grid_cell_begin(r, &t);
+        } else if(md_ui_tag_is(&t, "cell") && t.closing) {
+            if(r->ui_grid != NULL && r->ui_cols->capturing)
+                ui_column_end(r);
+        } else if(md_ui_tag_is(&t, "columns") && !t.closing) {
             if(r->ui_cols != NULL || r->ui_col_depth)
                 goto next;
             r->ui_cols = (MD_ANSI_COLUMNS*) calloc(1, sizeof(*r->ui_cols));
@@ -3687,19 +4021,21 @@ ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
                     ui_columns_free(r);
             }
         } else if(md_ui_tag_is(&t, "columns") && t.closing) {
-            if(r->ui_cols == NULL)
+            if(r->ui_cols == NULL || r->ui_grid != NULL)
                 goto next;
             if(r->ui_cols->capturing)
                 ui_column_end(r);
             ui_columns_emit(r);
             ui_columns_free(r);
         } else if(md_ui_tag_is(&t, "col") && !t.closing) {
-            if(r->ui_cols == NULL || r->ui_cols->capturing ||
+            if(r->ui_cols == NULL || r->ui_grid != NULL ||
+               r->ui_cols->capturing ||
                r->ui_cols->cur >= r->ui_cols->n)
                 goto next;
             ui_column_begin(r);
         } else if(md_ui_tag_is(&t, "col") && t.closing) {
-            if(r->ui_cols != NULL && r->ui_cols->capturing)
+            if(r->ui_cols != NULL && r->ui_grid == NULL &&
+               r->ui_cols->capturing)
                 ui_column_end(r);
         } else if(md_ui_tag_is(&t, "vfill") && !t.closing) {
             char arg[32];
@@ -4527,7 +4863,7 @@ md_ansi_ex_styled_ui(const MD_CHAR* input, MD_SIZE input_size,
         /* A column left open by the end of the document is dropped. */
         if(render.ui_cols != NULL && render.ui_cols->capturing)
             ui_column_end(&render);
-        ui_columns_free(&render);
+        ui_grid_free(&render);
         free(render.html_buf);
         free(render.lbuf);
         free(render.code_buf);
