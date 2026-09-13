@@ -1042,6 +1042,8 @@ fymd_render_fenced_block(struct fymd_renderer *r,
     if(opts->flags & FYMD_FBF_STYLE) {
         if(r->style->code_header != NULL && r->style->code_header[0] != '\0')
             lines++;
+        if(r->style->code_bubble_on != NULL)
+            lines++; /* blank row below the bubble legend */
         if(r->style->code_footer != NULL && r->style->code_footer[0] != '\0')
             lines++;
     }

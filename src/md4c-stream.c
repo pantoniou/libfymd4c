@@ -232,6 +232,14 @@ region_ends_open_fence(const char* data, size_t size)
 static int
 lang_progressive_unsafe(const MD_ANSI_STYLE* style, const char* lang, size_t n)
 {
+    /* Interior commits use fence decorations to separate synthetic chrome
+     * from body rows and the closing style. Layouts without both rules are
+     * rendered as a whole; their preview still updates on every push. */
+    if(style != NULL && (style->code_bubble_on != NULL ||
+       style->code_header == NULL || style->code_header[0] == '\0' ||
+       style->code_footer == NULL || style->code_footer[0] == '\0'))
+        return 1;
+
     /* A block renderer draws the closed block as a whole: it is not
      * progressive, so no interior line may be committed on its own. */
     if(md_ansi_style_block_renderer(style, lang, n) != NULL)
@@ -401,14 +409,20 @@ stream_render(MD4C_STREAM* s, STREAM_BUF* buf, const char* input,
         return -1;
 
     if(s->in_code_body) {
-        /* Drop the synthetic fence header: everything up to and including the
-         * first output newline. */
-        size_t p = 0;
-        while(p < buf->size && buf->data[p] != '\n') p++;
-        if(p < buf->size) {
-            p++;
-            memmove(buf->data, buf->data + p, buf->size - p);
-            buf->size -= p;
+        /* A continuation repeats only a header that the style actually draws.
+         * With no header, the first output row is already code content. */
+        if(s->style == NULL || (s->style->code_header != NULL &&
+                               s->style->code_header[0] != '\0')) {
+            size_t p = 0;
+            size_t rows = s->style != NULL && s->style->code_bubble_on != NULL ? 2 : 1;
+            while(p < buf->size && rows > 0) {
+                if(buf->data[p++] == '\n')
+                    rows--;
+            }
+            if(rows == 0) {
+                memmove(buf->data, buf->data + p, buf->size - p);
+                buf->size -= p;
+            }
         }
         /* The committed stream already carries code_block.on (emitted with
          * the FIRST committed body line), so the synthetic block must not
@@ -430,7 +444,7 @@ stream_render(MD4C_STREAM* s, STREAM_BUF* buf, const char* input,
                && memcmp(buf->data, on, onlen) == 0) {
                 memmove(buf->data, buf->data + onlen, buf->size - onlen);
                 buf->size -= onlen;
-            } else if(offlen > 0 && buf->size > 0) {
+            } else if(offlen > 0 && (buf->size > 0 || !open)) {
                 if(sbuf_append(buf, off, offlen) != 0)   /* grow, then rotate */
                     return -1;
                 memmove(buf->data + offlen, buf->data, buf->size - offlen);

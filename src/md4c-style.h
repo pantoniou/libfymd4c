@@ -97,6 +97,10 @@ typedef struct MD_ANSI_STYLE {
     const char*  code_header;    /* decoration template; "default" => legacy rule */
     const char*  code_footer;    /* decoration template; "default" => legacy rule */
     const char*  code_prefix;    /* prefix placed before every fenced content row */
+    const char*  code_bubble_on; /* background SGR; NULL means no bubble */
+    const char*  code_bubble_off;
+    const char*  code_legend_on; /* foreground SGR for the bubble language */
+    const char*  code_legend_off;
     int          code_marker_enabled; /* use code_marker (off by default, so the
                                          config can carry a marker that callers
                                          switch on per render) */

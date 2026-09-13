@@ -125,6 +125,102 @@ renderer(unsigned flags)
     return fymd_renderer_create(&cfg);
 }
 
+static size_t
+rule_rows(const char *out)
+{
+    size_t rows = 0;
+    const char *p = out, *end, *rule;
+    while(p && *p) {
+        end = strchr(p, '\n');
+        rule = strstr(p, "\u2500");
+        if(rule && (!end || rule < end))
+            rows++;
+        p = end ? end + 1 : NULL;
+    }
+    return rows;
+}
+
+static void
+test_code_rules(void)
+{
+    static const struct { const char *mode; size_t rows; } modes[] = {
+        { "none", 0 }, { "top", 1 }, { "both", 2 }, { "top-bottom", 2 }
+    };
+    static const char input[] = "```c\nint x;\n```\n\nafter\n";
+    struct fypal_caps caps = { .depth = FYPAL_DEPTH_TRUECOLOR, .attrs = FYPAL_ATTR_ALL };
+    struct fypal_ctx *palette = fypal_ctx_create(&caps);
+    struct fymd_renderer *r = renderer(FYMD_RF_NO_COLOR);
+    struct fymd_fenced_block_opts opts = { .language = "c", .flags = FYMD_FBF_DEFAULT };
+    char *out = NULL;
+    const char *p;
+    size_t i, len;
+
+    CHECK(palette && r);
+    if(!palette || !r)
+        goto out;
+    CHECK(fypal_ctx_load(palette,
+          "colors: {rule: '#123456', faint: '#abcdef'}\n", "rules") == 0);
+    for(i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
+        CHECK(fypal_ctx_set_param_string(palette, "md.code.rules",
+                                        FYPAL_SECTION_ALL, modes[i].mode) == 0);
+        CHECK(fymd_renderer_set_palette(r, palette) == 0);
+        CHECK(fymd_render(r, input, strlen(input), &out, &len) == 0);
+        CHECK(out && rule_rows(out) == modes[i].rows);
+        expect(__LINE__, out, "int x;", NULL);
+        fymd_free(out);
+        out = NULL;
+        CHECK(fymd_render_fenced_block(r, "int x;\n", 7, &opts, &out, &len) == 0);
+        CHECK(out && rule_rows(out) == modes[i].rows);
+        fymd_free(out);
+        out = NULL;
+    }
+    CHECK(fypal_ctx_set_param_string(palette, "md.code.rules", FYPAL_SECTION_ALL,
+                                    "bubble-rule-faint") == 0);
+    CHECK(fymd_renderer_set_palette(r, palette) == 0);
+    CHECK(fymd_render_fenced_block(r, "int x;\n", 7, &opts, &out, &len) == 0);
+    expect(__LINE__, out, "int x;", "\033");
+    expect(__LINE__, out, "  \u2500\u2500 C \u2500\u2500", NULL);
+    CHECK(out && rule_rows(out) == 1);
+    /* Label, blank and body rows are padded to the prose right edge. */
+    p = out ? strchr(out, '\n') : NULL;
+    CHECK(p && p - out == 86 && len == 245);
+    CHECK(p && strspn(p + 1, " ") == 78 && p[79] == '\n');
+    fymd_free(out);
+    out = NULL;
+    opts.flags = 0;
+    CHECK(fymd_render_fenced_block(r, "int x;\n", 7, &opts, &out, &len) == 0);
+    CHECK(out && !strcmp(out, "int x;\n"));
+    fymd_free(out);
+    out = NULL;
+    fymd_renderer_destroy(r);
+    r = renderer(0);
+    CHECK(r && fymd_renderer_set_palette(r, palette) == 0);
+    CHECK(fymd_render(r, input, strlen(input), &out, &len) == 0);
+    expect(__LINE__, out, "48;2;18;52;86m", NULL);
+    expect(__LINE__, out, "38;2;171;205;239m", NULL);
+    expect(__LINE__, out, "\u2500\u2500 C \u2500\u2500\033[39m", NULL);
+    expect(__LINE__, out, "\033[49m\n", NULL);
+    p = out ? strstr(out, "after") : NULL;
+    CHECK(p && strstr(p, "48;2;18;52;86m") == NULL);
+    fymd_free(out);
+    out = NULL;
+    /* Invalid modes and unresolved colours fail instead of silently changing layout. */
+    CHECK(fypal_ctx_set_param_string(palette, "md.code.rules", FYPAL_SECTION_ALL,
+                                    "bubble-missing-faint") == 0);
+    CHECK(fymd_renderer_set_palette(r, palette) == -1);
+    CHECK(fypal_ctx_set_param_string(palette, "md.code.rules", FYPAL_SECTION_ALL,
+                                    "sideways") == 0);
+    CHECK(fymd_renderer_set_palette(r, palette) == -1);
+    CHECK(fymd_renderer_set_palette(r, NULL) == 0);
+    CHECK(fymd_render(r, input, strlen(input), &out, &len) == 0);
+    CHECK(out && rule_rows(out) == 2);
+    expect(__LINE__, out, NULL, "48;2;18;52;86m");
+out:
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+    fypal_ctx_destroy(palette);
+}
+
 int
 main(void)
 {
@@ -140,6 +236,8 @@ main(void)
     const char *on, *off, *fin, *glyph;
     char *out;
     size_t len;
+
+    test_code_rules();
 
     palette = fypal_ctx_create(&caps);
     if(palette == NULL || fypal_ctx_load(palette, theme, "test") != 0) {

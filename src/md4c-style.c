@@ -509,6 +509,11 @@ typedef struct {
     int saved_doc_margin;
     const char* saved_code_header;
     const char* saved_code_footer;
+    const char* saved_code_bubble_on;
+    const char* saved_code_bubble_off;
+    const char* saved_code_legend_on;
+    const char* saved_code_legend_off;
+    int saved_code_reverse;
     STRREG reg;
 } PALETTE_OVERLAY;
 
@@ -542,6 +547,11 @@ palette_overlay_remove(MD_ANSI_STYLE* s)
     s->doc_margin = ov->saved_doc_margin;
     s->code_header = ov->saved_code_header;
     s->code_footer = ov->saved_code_footer;
+    s->code_bubble_on = ov->saved_code_bubble_on;
+    s->code_bubble_off = ov->saved_code_bubble_off;
+    s->code_legend_on = ov->saved_code_legend_on;
+    s->code_legend_off = ov->saved_code_legend_off;
+    s->code_reverse = ov->saved_code_reverse;
     s->palette_ascii = 0;
     reg_free(&ov->reg);
     free(ov);
@@ -591,6 +601,10 @@ md_ansi_style_set_palette_glyphs(MD_ANSI_STYLE* s, struct fypal_ctx* palette,
     PALETTE_OVERLAY* ov;
     MD_STYLE_PAIR* pair;
     const char* glyph;
+    const char* rules;
+    const char* sep;
+    char bg[128], sgr[128], off[128];
+    struct fypal_style bubble_style;
     double cols;
     size_t i;
 
@@ -629,17 +643,63 @@ md_ansi_style_set_palette_glyphs(MD_ANSI_STYLE* s, struct fypal_ctx* palette,
     if(fypal_ctx_param(palette, "gutter.cols", &cols) == 0 &&
        cols >= 0 && cols <= PALETTE_MARGIN_MAX)
         s->doc_margin = (int) cols;
-    /* md.code.rules: 0 draws a fenced block without the rows above and
-     * below it; the blank rows around a block still set it apart. */
     ov->saved_code_header = s->code_header;
     ov->saved_code_footer = s->code_footer;
-    if(fypal_ctx_param(palette, "md.code.rules", &cols) == 0 && cols == 0) {
-        s->code_header = "";
-        s->code_footer = "";
-    }
+    ov->saved_code_bubble_on = s->code_bubble_on;
+    ov->saved_code_bubble_off = s->code_bubble_off;
+    ov->saved_code_legend_on = s->code_legend_on;
+    ov->saved_code_legend_off = s->code_legend_off;
+    ov->saved_code_reverse = s->code_reverse;
     s->_palette = ov;
     s->palette = palette;
+    rules = fypal_ctx_param_string(palette, "md.code.rules");
+    if(rules == NULL && fypal_ctx_param(palette, "md.code.rules", &cols) == 0)
+        rules = cols == 0 ? "none" : "both";
+    if(rules != NULL && strcmp(rules, "none") == 0) {
+        s->code_header = "";
+        s->code_footer = "";
+    } else if(rules != NULL && strcmp(rules, "top") == 0) {
+        s->code_header = "default";
+        s->code_footer = "";
+    } else if(rules != NULL &&
+              (!strcmp(rules, "both") || !strcmp(rules, "top-bottom"))) {
+        s->code_header = s->code_footer = "default";
+    } else if(rules != NULL && !strncmp(rules, "bubble-", 7)) {
+        sep = strchr(rules + 7, '-');
+        if(sep == NULL || sep == rules + 7 || sep[1] == '\0' ||
+           (size_t)(sep - (rules + 7)) >= sizeof(bg))
+            goto invalid_rules;
+        memcpy(bg, rules + 7, (size_t)(sep - (rules + 7)));
+        bg[sep - (rules + 7)] = '\0';
+        if(fypal_ctx_color(palette, bg) == FYPAL_RGB_INVALID ||
+           fypal_ctx_color(palette, sep + 1) == FYPAL_RGB_INVALID)
+            goto invalid_rules;
+        memset(&bubble_style, 0, sizeof(bubble_style));
+        bubble_style.fg = bubble_style.ul = FYPAL_COLOR_UNSET;
+        bubble_style.bg = fypal_ctx_color_ref(palette, bg);
+        if(fypal_ctx_style_sgr(palette, &bubble_style, sgr, sizeof(sgr), off, sizeof(off)) < 0)
+            goto invalid_rules;
+        s->code_bubble_on = reg_dup(&ov->reg, sgr);
+        s->code_bubble_off = reg_dup(&ov->reg, off);
+        bubble_style.bg = FYPAL_COLOR_UNSET;
+        bubble_style.fg = fypal_ctx_color_ref(palette, sep + 1);
+        if(fypal_ctx_style_sgr(palette, &bubble_style, sgr, sizeof(sgr), off, sizeof(off)) < 0)
+            goto invalid_rules;
+        s->code_legend_on = reg_dup(&ov->reg, sgr);
+        s->code_legend_off = reg_dup(&ov->reg, off);
+        if(s->code_bubble_on == NULL || s->code_legend_on == NULL ||
+           s->code_bubble_off == NULL || s->code_legend_off == NULL)
+            goto invalid_rules;
+        s->code_header = "{rule}{rule} {language} {rule}{rule}";
+        s->code_footer = "";
+        s->code_reverse = 0;
+    } else if(rules != NULL) {
+        goto invalid_rules;
+    }
     return 0;
+invalid_rules:
+    palette_overlay_remove(s);
+    return -1;
 #else
     (void) ascii;
     if(s == NULL)

@@ -24,6 +24,7 @@
  */
 
 #include <limits.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -175,6 +176,9 @@ struct MD_ANSI_tag {
     int list_depth;
     unsigned heading_level; /* level of the open heading, 1-6; 0 outside one */
     int in_code_block;
+    int code_bubble_active;
+    int code_bubble_col;
+    int code_bubble_started;
     int code_footer_pending; /* streaming: trailing code-block footer deferred */
     int need_newline;       /* pending newline before next block */
     int need_indent;        /* emit indent prefix on next code text */
@@ -298,6 +302,7 @@ ansi_capture_append(const MD_CHAR* text, MD_SIZE size, void* userdata)
 }
 
 static int ansi_disp_width(const char* buf, MD_SIZE size);
+static int table_term_width(void);
 static MD_SIZE ansi_esc_len(const char* s, MD_SIZE n);
 static MD_SIZE ansi_utf8_decode(const char* s, MD_SIZE n, unsigned* cp);
 
@@ -539,9 +544,71 @@ out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 
 /* Write bytes straight to the output callback (bypassing the line buffer). */
 static void
+out_bubble(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
+{
+    MD_SIZE i = 0, e, written = 0;
+    int color = !(r->flags & MD_ANSI_FLAG_NO_COLOR);
+    int width = (r->wrap_cols > 0 ? r->wrap_cols : table_term_width()) - DOC_MARGIN;
+    const char* bg = r->style->code_bubble_on;
+#define BUBBLE_WRITE(p, n) do { MD_SIZE len_ = (MD_SIZE)(n); \
+    out_sink(r, (p), len_); written += len_; } while(0)
+    while(i < size) {
+        if(text[i] == '\n') {
+            /* Empty body rows keep the same unpainted document gutter. */
+            while(r->code_bubble_col < DOC_MARGIN) {
+                BUBBLE_WRITE(" ", 1);
+                r->code_bubble_col++;
+            }
+            if(color)
+                BUBBLE_WRITE(bg, strlen(bg));
+            while(r->code_bubble_col < width) {
+                BUBBLE_WRITE(" ", 1);
+                r->code_bubble_col++;
+            }
+            /* Close only our background; a syntax span can cross rows. */
+            if(color)
+                BUBBLE_WRITE(r->style->code_bubble_off, strlen(r->style->code_bubble_off));
+            BUBBLE_WRITE("\n", 1);
+            r->code_bubble_col = 0;
+            r->code_bubble_started = 0;
+            i++;
+            continue;
+        }
+        e = ansi_esc_len(text + i, size - i);
+        if(e > 0) {
+            BUBBLE_WRITE(text + i, e);
+            /* Syntax styles may reset or select another background. */
+            if(color && r->code_bubble_col >= DOC_MARGIN &&
+               e >= 3 && text[i + 1] == '[' && text[i + e - 1] == 'm')
+                BUBBLE_WRITE(bg, strlen(bg));
+        } else {
+            unsigned cp;
+            e = ansi_utf8_decode(text + i, size - i, &cp);
+            if(color && r->code_bubble_col >= DOC_MARGIN && !r->code_bubble_started) {
+                BUBBLE_WRITE(bg, strlen(bg));
+                r->code_bubble_started = 1;
+            }
+            BUBBLE_WRITE(text + i, e);
+            r->code_bubble_col += cp == '\t' ? 8 - r->code_bubble_col % 8 : fymd_cp_width(cp);
+        }
+        i += e;
+    }
+#undef BUBBLE_WRITE
+    if(size > 0)
+        r->line_dirty = r->code_bubble_col > 0;
+    if(r->flags & MD_ANSI_FLAG_CODE_META)
+        r->output_offset += written;
+}
+
+static void
 out_direct(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
     MD_SIZE i, j, e;
+
+    if(r->code_bubble_active && r->process_output == r->real_output) {
+        out_bubble(r, text, size);
+        return;
+    }
 
     /* A full reset inside inline cell content also clears the row background.
      * Replay the active row style immediately; card mode then performs its own
@@ -1910,6 +1977,7 @@ render_code_rule(MD_ANSI* r, const char* lang, MD_SIZE lang_size)
                                     : r->style->code_footer;
     int width, avail;
     char buf[1024];
+    char legend[64];
     size_t n;
 
     if(tmpl == NULL || tmpl[0] == '\0')
@@ -1919,16 +1987,30 @@ render_code_rule(MD_ANSI* r, const char* lang, MD_SIZE lang_size)
     avail = width - r->indent_w - DOC_MARGIN;   /* match prose right margin */
     if(avail < 4) avail = 4;
 
+    if(r->style->code_bubble_on != NULL && lang != NULL) {
+        MD_SIZE i;
+        if(lang_size >= sizeof(legend))
+            lang_size = sizeof(legend) - 1;
+        for(i = 0; i < lang_size; i++)
+            legend[i] = (char) toupper((unsigned char)lang[i]);
+        legend[lang_size] = '\0';
+        lang = legend;
+    }
+
     n = build_code_decoration_text(r->style, r->template_vars,
                                    tmpl, lang, lang_size,
                                    avail, r->template_lines,
                                    r->template_plain_lines,
                                    r->template_hidden_lines,
                                    buf, sizeof(buf));
-    render_ansi(r, r->style->rule.on);
+    render_ansi(r, r->style->code_bubble_on != NULL ?
+                   r->style->code_legend_on : r->style->rule.on);
     render_verbatim(r, buf, (MD_SIZE) n);
-    render_ansi(r, r->style->rule.off);
+    render_ansi(r, r->style->code_bubble_on != NULL ?
+                   r->style->code_legend_off : r->style->rule.off);
     render_newline(r);
+    if(r->style->code_bubble_on != NULL && lang != NULL)
+        render_newline(r);
 }
 
 /* Byte length of the longest prefix of buf (raw UTF-8, no ANSI escapes) that
@@ -2042,12 +2124,15 @@ emit_plain_code(MD_ANSI* r)
                     len = ansi_clip_bytes(r->code_buf + start, len, avail);
                 render_verbatim(r, r->code_buf + start, len);
             }
+            if(i + 1 == r->code_size && r->code_buf[i] == '\n')
+                render_ansi(r, r->style->code_block.off);
             if(i < r->code_size)
                 render_newline(r);
             start = i + 1;
         }
     }
-    render_ansi(r, r->style->code_block.off);
+    if(r->code_buf[r->code_size - 1] != '\n')
+        render_ansi(r, r->style->code_block.off);
 }
 
 #ifdef MD4C_WITH_FYTS
@@ -3796,6 +3881,13 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                                         r->code_lang, r->code_lang_size);
             if(r->code_custom != NULL)
                 r->code_highlight = 1;
+            /* Without a footer, close plain styling before the body's last
+             * newline, not on an escape-only row that a stream trims away. */
+            if(r->style->code_footer == NULL || r->style->code_footer[0] == '\0')
+                r->code_highlight = 1;
+            r->code_bubble_active = r->style->code_bubble_on != NULL &&
+                                    r->code_custom == NULL;
+            r->code_bubble_col = 0;
 
             /* Header rule (with the language label, when present). In reverse
              * mode the header is deferred to leave, where it is drawn on fyts's
@@ -3954,7 +4046,10 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 /* Declined: draw the header that waited. In reverse mode the
                  * code path draws its own. */
                 if(done == 0 && !(r->style->code_reverse && !r->card))
+                {
+                    r->code_bubble_active = r->style->code_bubble_on != NULL;
                     render_code_rule(r, r->code_lang, r->code_lang_size);
+                }
             }
             if(done == 0 && r->code_highlight) {
                 if(r->code_diff)
@@ -3992,6 +4087,9 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 else
                     render_code_rule(r, NULL, 0);   /* footer (label-less) */
             }
+            if(r->code_bubble_active && r->line_dirty)
+                render_newline(r);
+            r->code_bubble_active = 0;
             r->in_code_block = 0;
             r->need_newline = 1;
             break;
@@ -4594,6 +4692,7 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
         render.code_highlight = 1;
     }
 
+    render.code_bubble_active = styled && style->code_bubble_on != NULL;
     if(styled && !(render.code_highlight && !render.code_diff &&
                    style->code_reverse && !render.card))
         render_code_rule(&render, render.code_lang, render.code_lang_size);
@@ -4617,6 +4716,7 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
             render_newline(&render);
         render_code_rule(&render, NULL, 0);
     }
+    render.code_bubble_active = 0;
 
 out:
     if(render.line_open)

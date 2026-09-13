@@ -273,6 +273,10 @@ if (BUILD_FYMD4C_EXECUTABLE)
                 target_compile_definitions(palette-api-test PRIVATE FYMD_TEST_CODE_PALETTE)
             endif()
             add_test(NAME palette-api COMMAND palette-api-test)
+            add_test(NAME code-rules
+                COMMAND ${PYTHON3_EXECUTABLE}
+                        "${CMAKE_CURRENT_SOURCE_DIR}/test/code-rules-test.py"
+                        -p "$<TARGET_FILE:fymd4c-cli>")
 
             add_test(NAME palette-cli
                 COMMAND "$<TARGET_FILE:fymd4c-cli>" --color=on --background=dark
