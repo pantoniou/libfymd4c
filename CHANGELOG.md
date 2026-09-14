@@ -10,6 +10,10 @@
     and `fit-right`, `fit-left` is `fit`, and `fit` is now the default of the
     CLI; the renderer still fills by default.
 
+  * fymd4c: `--theme` takes the name of a built-in libfypalette theme, such as
+    `ember`, when no embedded theme has that name, and applies it as
+    `--palette` does.
+
   * ANSI renderer: fenced blocks can be marked instead of ruled.
     `code.decoration.marker` (renderer cfg `code_marker`, CLI
     `--code-marker=STR`) prefixes the **first** content row with the given

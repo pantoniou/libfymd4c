@@ -66,7 +66,9 @@ Load styling from the YAML file \fIFILE\fR instead of the embedded default.
 .B --theme= \fINAME\fR
 Use an embedded document theme. Available names are \fBdefault\fR,
 \fBcatppuccin\fR, \fBkanagawa\fR, \fBsolarized\fR, and \fBtokyonight\fR.
-Each non-default theme also has a \fB-borderless\fR variant.
+Each non-default theme also has a \fB-borderless\fR variant. A name that no
+embedded theme has can name a built-in libfypalette theme, such as
+\fBember\fR, which then applies as \fB--palette\fR does.
 .
 .TP
 .B --palette= \fITHEME\fR

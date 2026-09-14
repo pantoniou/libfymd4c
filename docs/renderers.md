@@ -168,7 +168,8 @@ UTF-8 forms. `fymd_renderer_set_palette()` takes the UTF-8 forms.
 
 The build uses libfypalette when it finds the package: `-DMD4C_FYPALETTE=on`
 makes it required and `-DMD4C_FYPALETTE=off` disables it. `fymd4c
---palette=ember` renders with a palette theme.
+--palette=ember` renders with a palette theme, and so does `fymd4c
+--theme=ember`: a theme name that no embedded theme has names a palette theme.
 
 ```c
 
