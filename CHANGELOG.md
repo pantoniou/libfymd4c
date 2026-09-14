@@ -4,6 +4,12 @@
 
 ## Fork additions (ANSI renderer / libfymd4c)
 
+  * ANSI renderer: a table fitted to its content can stand in the middle or at
+    the right of the width. `FYMD_RF_TABLE_CENTER` and `FYMD_RF_TABLE_RIGHT`
+    place it with `FYMD_RF_TABLE_FIT`. The CLI takes `--table-size=fit-center`
+    and `fit-right`, `fit-left` is `fit`, and `fit` is now the default of the
+    CLI; the renderer still fills by default.
+
   * ANSI renderer: fenced blocks can be marked instead of ruled.
     `code.decoration.marker` (renderer cfg `code_marker`, CLI
     `--code-marker=STR`) prefixes the **first** content row with the given

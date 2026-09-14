@@ -93,7 +93,11 @@ Control raw fenced-block decoration for \fB--language\fR: \fBon\fR (default) emi
 .
 .TP
 .B --table-size= \fIMODE\fR
-Table sizing: fit to content or to width.
+Table sizing. \fBfit\fR (default) sizes the columns to their content, growing
+only up to the width; \fBfit-left\fR is the same. \fBfit-center\fR and
+\fBfit-right\fR also size to content, and place a table narrower than the width
+in the middle or at the right of the room it leaves. \fBfill\fR expands the
+columns to the full width.
 .
 .TP
 .B --stream

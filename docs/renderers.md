@@ -383,6 +383,8 @@ one-shot and progressive language rendering.
 | `FYMD_RF_NO_COLOR`     | Emit no SGR color sequences                       |
 | `FYMD_RF_SHOW_URLS`    | Show link targets inline                          |
 | `FYMD_RF_TABLE_FIT`    | Size tables to content instead of filling width   |
+| `FYMD_RF_TABLE_CENTER` | With `FYMD_RF_TABLE_FIT`, place a table narrower than the width in the middle of the room it leaves |
+| `FYMD_RF_TABLE_RIGHT`  | ... or at its right; wins over `FYMD_RF_TABLE_CENTER` |
 | `FYMD_RF_HEAL`         | Close dangling markers in the active/in-progress tail |
 | `FYMD_RF_REVERSE`      | Render the whole document as a card (theme background filled to width) |
 | `FYMD_RF_NO_CODE_HL`   | Disable fenced-code syntax highlighting           |
@@ -512,6 +514,8 @@ auto-detect. `md_ansi()` is `md_ansi_ex()` with `AUTO`.
 | `MD_ANSI_FLAG_CODE_META`     | `0x0008` | Append code-block metadata after a NUL byte   |
 | `MD_ANSI_FLAG_SHOW_URLS`     | `0x0010` | Show link URLs after link text (default OSC 8)|
 | `MD_ANSI_FLAG_TABLE_FIT_CONTENT` | `0x0020` | Size tables to content (grow to width), don't fill |
+| `MD_ANSI_FLAG_TABLE_CENTER`  | `0x8000` | With TABLE_FIT_CONTENT, center a table narrower than the width |
+| `MD_ANSI_FLAG_TABLE_RIGHT`   | `0x10000`| ... or place it at the right; wins over CENTER |
 | `MD_ANSI_FLAG_HEAL`          | `0x0100` | Heal the input before rendering (see below)   |
 
 ### Rendering details
@@ -522,10 +526,13 @@ auto-detect. `md_ansi()` is `md_ansi_ex()` with `AUTO`.
   rules and code blocks dim; entities resolved to UTF-8; raw HTML stripped.
 - **Tables** are laid out glow-style: content-sized columns with Unicode box
   separators (`│ ┼ ─`), a header separator, per-column alignment, 1-space cell
-  padding, shrink with cell word-wrap when too wide. By default narrow tables
-  expand to fill the width; `MD_ANSI_FLAG_TABLE_FIT_CONTENT` (CLI
-  `--table-size=fit`) instead sizes columns to their content, growing only up to
-  the width and then shrinking/wrapping to fit.
+  padding, shrink with cell word-wrap when too wide. By default the renderer
+  expands narrow tables to fill the width; `MD_ANSI_FLAG_TABLE_FIT_CONTENT` (CLI
+  `--table-size=fit`, the default of the CLI) instead sizes columns to their
+  content, growing only up to the width and then shrinking/wrapping to fit.
+  With it, `MD_ANSI_FLAG_TABLE_CENTER` and `MD_ANSI_FLAG_TABLE_RIGHT` (CLI
+  `fit-center` and `fit-right`; `fit-left` is `fit`) place a table narrower than
+  the width in the middle or at the right of the room it leaves.
 - **Word-wrapping**: all text is wrapped to the width with a symmetric 2-column
   document margin; code blocks are left preformatted; `--width=inf` disables it.
 - **Display widths** use a Markus-Kuhn-style `wcwidth` table (zero-width
