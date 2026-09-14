@@ -680,7 +680,8 @@ usage(void)
         "      --table-size=MODE  Table sizing: fit to content (default; also fit-left),\n"
         "                       fit-center, fit-right, or fill the width\n"
         "      --style=FILE     YAML styling config (overrides the built-in default)\n"
-        "      --theme=NAME     Embedded theme (append -borderless for grid-free tables)\n"
+        "      --theme=NAME     Embedded theme (append -borderless for grid-free tables),\n"
+        "                       or a libfypalette theme such as ember\n"
         "      --palette=THEME  Colour from a libfypalette theme: a built-in name or a file\n"
         "      --background=MODE  Background for light/dark styles: auto (default), dark, light\n"
         "      --sgr=MODE       Input ANSI escapes: off (default, strip), on (pass), safe (SGR only)\n"
@@ -1022,6 +1023,18 @@ parse_args(int argc, char** argv)
 }
 
 #ifdef MD4C_WITH_FYPALETTE
+/* Whether @name is an embedded theme of the renderer. */
+static int
+cli_theme_embedded(const char* name)
+{
+    size_t i, n = fymd_theme_count();
+
+    for(i = 0; i < n; i++)
+        if(strcmp(name, fymd_theme_name(i)) == 0)
+            return 1;
+    return 0;
+}
+
 /* A palette for a built-in theme name or a theme file, for the output that the
  * colour and background options select. */
 static struct fypal_ctx*
@@ -1104,6 +1117,17 @@ main(int argc, char** argv)
 
     /* Build the ANSI renderer once. Its parser flags default to the renderer's
      * rich set only when no explicit dialect flag was given. */
+#ifdef MD4C_WITH_FYPALETTE
+    /* A --theme that no embedded theme answers can name a palette theme, which
+     * then styles the default document theme as --palette does. */
+    if(theme_name != NULL && palette_theme == NULL &&
+       !cli_theme_embedded(theme_name) &&
+       fypal_builtin_theme_text(theme_name) != NULL) {
+        palette_theme = theme_name;
+        theme_name = NULL;
+    }
+#endif
+
     memset(&cfg, 0, sizeof(cfg));
     cfg.style_path = style_path;
     cfg.theme = theme_name;
