@@ -73,6 +73,11 @@ extern "C"
 #define MD_ANSI_FLAG_UI 0x2000
 /* Keep the vfill and scroll row markers in the output for md_ui_vertical(). */
 #define MD_ANSI_FLAG_UI_ROWS 0x4000
+/* With MD_ANSI_FLAG_TABLE_FIT_CONTENT, a table narrower than the width stands
+ * in the middle of the room it leaves, or at its right. RIGHT wins over
+ * CENTER. */
+#define MD_ANSI_FLAG_TABLE_CENTER 0x8000
+#define MD_ANSI_FLAG_TABLE_RIGHT 0x10000
 
 /* Presentation flags for md_ansi_fenced_styled(). */
 #define MD_ANSI_FENCE_STYLE     0x01

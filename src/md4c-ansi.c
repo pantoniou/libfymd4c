@@ -226,6 +226,7 @@ struct MD_ANSI_tag {
 
     MD_ANSI_TABLE* table;   /* non-NULL while inside a table block */
     int table_width;        /* >0 fixed, 0 = unlimited, <0 = auto-detect */
+    int table_pad;          /* blanks before each row of the table emitted */
     const MD_ANSI_STYLE* style;  /* element styling (never NULL during render) */
     fy_generic template_vars;    /* borrowed raw-fence {key} values */
     size_t template_lines;
@@ -1670,6 +1671,7 @@ table_emit_row(MD_ANSI* r, MD_ANSI_TROW* row, const int* widths, int n_cols,
 
     for(k = 0; k < height; k++) {
         render_indent(r);
+        tbl_spaces(r, r->table_pad);
         if(row_style != NULL && row_style->on[0] != '\0') {
             r->table_row_on = row_style->on;
             render_ansi(r, row_style->on);
@@ -1708,6 +1710,7 @@ table_emit_separator(MD_ANSI* r, const int* widths, int n_cols,
     int j, k;
     const char* h = r->style->table_horizontal;
     render_indent(r);
+    tbl_spaces(r, r->table_pad);
     if(row_style != NULL && row_style->on[0] != '\0') {
         r->table_row_on = row_style->on;
         render_ansi(r, row_style->on);
@@ -1754,6 +1757,7 @@ table_emit(MD_ANSI* r)
     widths = (int*) calloc((size_t) n_cols, sizeof(int));
     if(widths == NULL)
         return;
+    r->table_pad = 0;
 
     /* Natural column widths = max cell display width per column. */
     for(i = 0; i < t->n_rows; i++) {
@@ -1808,6 +1812,13 @@ table_emit(MD_ANSI* r)
                 widths[wi]++;
                 total++;
             }
+        } else if(total < content_avail) {
+            /* A fitted table stands in the middle of the room it leaves, or
+             * at its right. */
+            if(r->flags & MD_ANSI_FLAG_TABLE_RIGHT)
+                r->table_pad = content_avail - total;
+            else if(r->flags & MD_ANSI_FLAG_TABLE_CENTER)
+                r->table_pad = (content_avail - total) / 2;
         }
     }
 
@@ -1840,6 +1851,7 @@ table_emit(MD_ANSI* r)
         r->wrap_suspend = saved_suspend;
     }
 
+    r->table_pad = 0;
     free(widths);
 }
 

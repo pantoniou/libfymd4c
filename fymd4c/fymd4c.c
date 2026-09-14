@@ -73,7 +73,8 @@ static enum fymd_line_limit_mode line_limit_mode = FYMD_LLM_SCROLL;
 static enum fymd_line_split line_split = FYMD_LLS_BALANCED;
 static size_t line_head = 0;
 static const char* line_separator = NULL;
-static int table_fit_content = 0;
+/* FYMD_RF_TABLE_* flags: a table fitted to its content by default. */
+static unsigned table_size = FYMD_RF_TABLE_FIT;
 static const char* style_path = NULL;
 static const char* theme_name = NULL;
 static const char* palette_theme = NULL;
@@ -676,7 +677,8 @@ usage(void)
         "ANSI output options (--format=ansi, the default):\n"
         "      --color=MODE     Color output: auto (default), on, off\n"
         "      --width=WIDTH    Table width: auto (default), inf, or a column count\n"
-        "      --table-size=MODE  Table sizing: fill width (default) or fit to content\n"
+        "      --table-size=MODE  Table sizing: fit to content (default; also fit-left),\n"
+        "                       fit-center, fit-right, or fill the width\n"
         "      --style=FILE     YAML styling config (overrides the built-in default)\n"
         "      --theme=NAME     Embedded theme (append -borderless for grid-free tables)\n"
         "      --palette=THEME  Colour from a libfypalette theme: a built-in name or a file\n"
@@ -826,12 +828,17 @@ parse_args(int argc, char** argv)
             }
 
             case OPT_TABLE_SIZE:
-                if(strcmp(optarg, "fit") == 0)
-                    table_fit_content = 1;
+                if(strcmp(optarg, "fit") == 0 || strcmp(optarg, "fit-left") == 0)
+                    table_size = FYMD_RF_TABLE_FIT;
+                else if(strcmp(optarg, "fit-center") == 0)
+                    table_size = FYMD_RF_TABLE_FIT | FYMD_RF_TABLE_CENTER;
+                else if(strcmp(optarg, "fit-right") == 0)
+                    table_size = FYMD_RF_TABLE_FIT | FYMD_RF_TABLE_RIGHT;
                 else if(strcmp(optarg, "fill") == 0)
-                    table_fit_content = 0;
+                    table_size = 0;
                 else {
-                    fprintf(stderr, "Invalid --table-size value: %s (use fit or fill)\n", optarg);
+                    fprintf(stderr, "Invalid --table-size value: %s (use fit, "
+                            "fit-left, fit-center, fit-right or fill)\n", optarg);
                     exit(1);
                 }
                 break;
@@ -1106,7 +1113,7 @@ main(int argc, char** argv)
     cfg.background = forced_bg;
     cfg.sgr_input = sgr_input;
     if(!use_color)          cfg.flags |= FYMD_RF_NO_COLOR;
-    if(table_fit_content)   cfg.flags |= FYMD_RF_TABLE_FIT;
+    cfg.flags |= table_size;
     if(want_heal)           cfg.flags |= FYMD_RF_HEAL;
     if(forced_reverse)      cfg.flags |= FYMD_RF_REVERSE;
     cfg.code_marker = code_marker;

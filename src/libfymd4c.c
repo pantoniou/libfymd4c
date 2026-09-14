@@ -440,6 +440,8 @@ fymd_renderer_create(const struct fymd_renderer_cfg *cfg)
     if(cfg->flags & FYMD_RF_NO_COLOR)  rf |= MD_ANSI_FLAG_NO_COLOR;
     if(cfg->flags & FYMD_RF_SHOW_URLS) rf |= MD_ANSI_FLAG_SHOW_URLS;
     if(cfg->flags & FYMD_RF_TABLE_FIT) rf |= MD_ANSI_FLAG_TABLE_FIT_CONTENT;
+    if(cfg->flags & FYMD_RF_TABLE_CENTER) rf |= MD_ANSI_FLAG_TABLE_CENTER;
+    if(cfg->flags & FYMD_RF_TABLE_RIGHT) rf |= MD_ANSI_FLAG_TABLE_RIGHT;
     if(cfg->flags & FYMD_RF_HEAL)      rf |= MD_ANSI_FLAG_HEAL;
     if(cfg->flags & FYMD_RF_REVERSE)   rf |= MD_ANSI_FLAG_REVERSE;
     if(cfg->flags & FYMD_RF_UI)        rf |= MD_ANSI_FLAG_UI;

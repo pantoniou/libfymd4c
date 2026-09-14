@@ -81,7 +81,10 @@ enum fymd_cfg_flags {
     FYMD_RF_CODE_MARKER  = FYMD_BIT(9), /* switch the styling's fenced-block
                                            first-row marker on for this render */
     FYMD_RF_NO_CODE_MARKER = FYMD_BIT(10), /* ... or off, whatever it configures */
-    FYMD_RF_UI           = FYMD_BIT(11) /* UI Markdown: act on the fy-* tags */
+    FYMD_RF_UI           = FYMD_BIT(11), /* UI Markdown: act on the fy-* tags */
+    FYMD_RF_TABLE_CENTER = FYMD_BIT(12), /* with TABLE_FIT, a table narrower
+                                           than the width stands in the middle */
+    FYMD_RF_TABLE_RIGHT  = FYMD_BIT(13)  /* ... or at the right; RIGHT wins */
 };
 
 /* Sensible default flags: heal the in-progress tail. */
