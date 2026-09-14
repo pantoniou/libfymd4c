@@ -301,6 +301,17 @@ if (BUILD_FYMD4C_EXECUTABLE)
                         "${CMAKE_CURRENT_SOURCE_DIR}/test/palette.md")
             set_tests_properties(palette-cli-bad-theme PROPERTIES WILL_FAIL TRUE)
 
+            # --theme takes a palette theme by its name.
+            add_test(NAME palette-cli-theme
+                COMMAND "$<TARGET_FILE:fymd4c-cli>" --color=on --background=dark
+                        --theme=ember "${CMAKE_CURRENT_SOURCE_DIR}/test/palette.md")
+            set_tests_properties(palette-cli-theme PROPERTIES
+                PASS_REGULAR_EXPRESSION "\\[1;38;2;[0-9]+;[0-9]+;[0-9]+mPlan")
+
+            add_test(NAME palette-cli-bad-theme-name
+                COMMAND "$<TARGET_FILE:fymd4c-cli>" --color=on --theme=no-such-theme
+                        "${CMAKE_CURRENT_SOURCE_DIR}/test/palette.md")
+            set_tests_properties(palette-cli-bad-theme-name PROPERTIES WILL_FAIL TRUE)
         endif()
 
         add_test(
