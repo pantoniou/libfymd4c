@@ -164,6 +164,9 @@ if(MD4C_WITH_FYTS)
         # into our shared libfymd4c.
         set(CMAKE_POSITION_INDEPENDENT_CODE ON)
         FetchContent_MakeAvailable(libfyts)
+        # FetchContent keeps libfyts's feature variables in its directory scope.
+        get_directory_property(libfyts_HAVE_FYPALETTE
+            DIRECTORY "${libfyts_SOURCE_DIR}" DEFINITION FYTS_HAVE_FYPALETTE)
         set(MD4C_FYTS_TARGET fyts_static)
     endif()
 endif()
