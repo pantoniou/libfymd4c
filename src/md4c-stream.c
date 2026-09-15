@@ -377,7 +377,6 @@ stream_render(MD4C_STREAM* s, STREAM_BUF* buf, const char* input,
         flags |= MD_ANSI_FLAG_HEAL;
     else
         flags &= ~(unsigned) MD_ANSI_FLAG_HEAL;
-
     if(s->in_code_body) {
         /* Prepend the fence opener (same delimiter and run length as the real
          * one, so interior lines that look like shorter/other fences do not
@@ -415,6 +414,9 @@ stream_render(MD4C_STREAM* s, STREAM_BUF* buf, const char* input,
                                s->style->code_header[0] != '\0')) {
             size_t p = 0;
             size_t rows = s->style != NULL && s->style->code_bubble_on != NULL ? 2 : 1;
+            /* A fence without a language has no label row. */
+            if(s->code_lang_size == 0)
+                rows--;
             while(p < buf->size && rows > 0) {
                 if(buf->data[p++] == '\n')
                     rows--;

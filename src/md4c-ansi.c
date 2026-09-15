@@ -202,6 +202,7 @@ struct MD_ANSI_tag {
     int code_bubble_col;
     int code_bubble_started;
     int code_footer_pending; /* streaming: trailing code-block footer deferred */
+    int code_close_pending; /* streaming: closing row of a bubble deferred */
     int need_newline;       /* pending newline before next block */
     int need_indent;        /* emit indent prefix on next code text */
     int code_col;           /* display column within the current code line (clip) */
@@ -2008,6 +2009,17 @@ build_code_decoration_text(const MD_ANSI_STYLE* style, fy_generic vars,
     return n;
 }
 
+/* A blank row of a fenced-code bubble. It keeps the quote bars; a tight page
+ * has no separator rows, so the row is a plain line there. */
+static void
+render_bubble_blank(MD_ANSI* r)
+{
+    if(r->ui_tight > 0)
+        render_newline(r);
+    else
+        render_separator(r);
+}
+
 /* Emit a themed header/footer line delimiting a fenced code block. */
 static void
 render_code_rule(MD_ANSI* r, const char* lang, MD_SIZE lang_size)
@@ -2021,6 +2033,13 @@ render_code_rule(MD_ANSI* r, const char* lang, MD_SIZE lang_size)
 
     if(tmpl == NULL || tmpl[0] == '\0')
         return;
+    /* A fence without a language has no label, so it has no header. A bubble
+     * opens on its blank row alone. */
+    if(lang != NULL && lang_size == 0) {
+        if(r->style->code_bubble_on != NULL)
+            render_bubble_blank(r);
+        return;
+    }
     render_indent(r);
     width = (r->wrap_cols > 0) ? r->wrap_cols : table_term_width();
     avail = width - r->indent_w - DOC_MARGIN;   /* match prose right margin */
@@ -2049,7 +2068,18 @@ render_code_rule(MD_ANSI* r, const char* lang, MD_SIZE lang_size)
                    r->style->code_legend_off : r->style->rule.off);
     render_newline(r);
     if(r->style->code_bubble_on != NULL && lang != NULL)
-        render_newline(r);
+        render_bubble_blank(r);
+}
+
+/* Whether the buffered code of a fence ends on a blank row. */
+static int
+code_ends_blank(const MD_ANSI* r)
+{
+    MD_SIZE n = r->code_size;
+
+    if(n > 0 && r->code_buf[n - 1] == '\n')
+        n--;
+    return n == 0 || r->code_buf[n - 1] == '\n';
 }
 
 /* Byte length of the longest prefix of buf (raw UTF-8, no ANSI escapes) that
@@ -4104,6 +4134,10 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
         r->code_footer_pending = 0;
         render_code_rule(r, NULL, 0);
     }
+    if(r->code_close_pending) {
+        r->code_close_pending = 0;
+        render_bubble_blank(r);
+    }
 
     switch(type) {
         case MD_BLOCK_DOC:
@@ -4458,6 +4492,18 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             }
             if(r->code_bubble_active && r->line_dirty)
                 render_newline(r);
+            /*
+             * A bubble ends on a blank row, as it opens on one. Code that ends
+             * on a blank row has the row already. A still-open trailing fence
+             * defers the row with its footer.
+             */
+            if(r->code_bubble_active && r->code_size > 0 &&
+               !code_ends_blank(r)) {
+                if(r->code_footer_pending)
+                    r->code_close_pending = 1;
+                else
+                    render_bubble_blank(r);
+            }
             r->code_bubble_active = 0;
             r->in_code_block = 0;
             r->need_newline = 1;
