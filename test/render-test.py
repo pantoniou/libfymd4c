@@ -20,16 +20,16 @@ BAR = "│"
 # name -> (markdown input, expected --color=off output)
 CASES = {
     # A bullet list nested in an ordered item keeps bullet markers (not the
-    # parent's numbering) and each level indents two more columns.
+    # parent's numbering) and starts under the parent's text.
     "nested_ul_under_ol": (
         "1. Ordered item\n"
         "   - Nested bullet\n"
         "   - Another bullet\n"
         "     - Deeper bullet\n",
         "  1. Ordered item\n"
-        "    * Nested bullet\n"
-        "    * Another bullet\n"
-        "      * Deeper bullet\n",
+        "     * Nested bullet\n"
+        "     * Another bullet\n"
+        "       * Deeper bullet\n",
     ),
     # An ordered list nested in a bullet item keeps its own numbering.
     "nested_ol_under_ul": (
@@ -67,8 +67,28 @@ CASES = {
         "> outer\n>\n> > inner\n",
         "  %s outer\n  %s\n  %s %s inner\n" % (BAR, BAR, BAR, BAR),
     ),
+    # A wrapped item hangs under its text, not under its marker.
+    "hang_bullet": (
+        "- aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa tail\n",
+        "  * aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa\n    aaaa aaaa tail\n",
+    ),
+    "hang_ordered": (
+        "1. aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa tail\n2. b\n",
+        "  1. aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa\n     aaaa aaaa aaaa tail\n  2. b\n",
+    ),
+    "hang_two_digit": (
+        "10. aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa tail\n",
+        "  10. aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa\n      aaaa aaaa aaaa tail\n",
+    ),
+    "hang_task": (
+        "- [ ] aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa tail\n",
+        "  [ ] aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa\n      aaaa aaaa aaaa tail\n",
+    ),
+    "hang_nested": (
+        "- top\n  - aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa tail\n",
+        "  * top\n    * aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa aaaa\n      aaaa aaaa aaaa tail\n",
+    ),
 }
-
 
 def run(program, text, extra=None):
     p = subprocess.run([program, "-t", "ansi", "--color=off", "--width=60"]
