@@ -222,6 +222,7 @@ struct MD_ANSI_tag {
         int counter;        /* next number for ordered lists */
         int tight;          /* md4c is_tight: no blank line between items */
         int seen;           /* an item has already been rendered in this list */
+        int marker_w;       /* display width of the open item's marker */
     } lists[MD_ANSI_MAX_LIST];
     int list_sp;            /* number of open lists (stack depth) */
 
@@ -749,15 +750,19 @@ render_indent_chrome(MD_ANSI* r)
         RENDER_VERBATIM(r, " ");
         render_ansi(r, r->style->blockquote.off);
     }
+    /* An open item indents its content by the width of its marker, so a
+     * wrapped or following line lines up with the item's text. */
     for(i = 0; i < r->list_depth; i++) {
-        RENDER_VERBATIM(r, "  ");
+        int w = (i < MD_ANSI_MAX_LIST) ? r->lists[i].marker_w : 2;
+        for(; w > 0; w--)
+            RENDER_VERBATIM(r, " ");
     }
 }
 
 /* Start a new line: emit its indent prefix directly and remember it (so wrap
  * continuation lines can replay the exact same prefix). */
 static void
-render_indent(MD_ANSI* r)
+capture_indent(MD_ANSI* r)
 {
     ANSI_CAPTURE_BUF cap;
     void (*saved_out)(const MD_CHAR*, MD_SIZE, void*) = r->process_output;
@@ -782,6 +787,12 @@ render_indent(MD_ANSI* r)
 
     r->indent_len = cap.size;
     r->indent_w = ansi_disp_width(r->indent_buf, cap.size);
+}
+
+static void
+render_indent(MD_ANSI* r)
+{
+    capture_indent(r);
     out_direct(r, r->indent_buf, r->indent_len);
 }
 
@@ -4176,6 +4187,7 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
         case MD_BLOCK_LI: {
             const MD_BLOCK_LI_DETAIL* li = (const MD_BLOCK_LI_DETAIL*)detail;
             int top = r->list_sp - 1;
+            int marker_w, saved_suspend;
             /* Loose lists put a blank line between items (after the first). */
             if(top >= 0 && top < MD_ANSI_MAX_LIST && r->lists[top].seen
                && !r->lists[top].tight)
@@ -4183,6 +4195,11 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             if(top >= 0 && top < MD_ANSI_MAX_LIST)
                 r->lists[top].seen = 1;
             render_indent(r);
+            marker_w = 2;
+            /* The marker is part of the prefix: the wrap width already
+             * leaves room for it, so keep it out of the line buffer. */
+            saved_suspend = r->wrap_suspend;
+            r->wrap_suspend = 1;
             if(li->is_task) {
                 if(li->task_mark == 'x' || li->task_mark == 'X') {
                     render_ansi(r, r->style->task_done.on);
@@ -4192,9 +4209,12 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                     RENDER_VERBATIM(r, r->style->task_open_glyph);
                 }
                 RENDER_VERBATIM(r, " ");
+                marker_w = ansi_disp_width(r->style->task_open_glyph,
+                                           (MD_SIZE) strlen(r->style->task_open_glyph)) + 1;
             } else if(top >= 0 && top < MD_ANSI_MAX_LIST && r->lists[top].ordered) {
                 char buf[16];
                 snprintf(buf, sizeof(buf), "%d. ", r->lists[top].counter);
+                marker_w = (int) strlen(buf);
                 render_ansi(r, r->style->list_marker.on);
                 RENDER_VERBATIM(r, buf);
                 render_ansi(r, r->style->list_marker.off);
@@ -4204,8 +4224,15 @@ enter_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
                 RENDER_VERBATIM(r, r->style->list_bullet);
                 RENDER_VERBATIM(r, " ");
                 render_ansi(r, r->style->list_marker.off);
+                marker_w = ansi_disp_width(r->style->list_bullet,
+                                           (MD_SIZE) strlen(r->style->list_bullet)) + 1;
             }
+            r->wrap_suspend = saved_suspend;
+            if(top >= 0 && top < MD_ANSI_MAX_LIST)
+                r->lists[top].marker_w = marker_w;
             r->list_depth++;
+            /* Wrapped lines of the item replay the prefix: make it hang. */
+            capture_indent(r);
             r->li_opened = 1;
             break;
         }
@@ -4422,11 +4449,12 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
             break;
 
         case MD_BLOCK_LI:
-            r->list_depth--;
             /* End the item's own line; if it already ended (e.g. with a nested
-             * list or a closing paragraph) don't add a spurious blank line. */
+             * list or a closing paragraph) don't add a spurious blank line.
+             * The item is still open, so its wrapped lines hang under it. */
             if(r->line_dirty)
                 render_newline(r);
+            r->list_depth--;
             break;
 
         case MD_BLOCK_HR:
