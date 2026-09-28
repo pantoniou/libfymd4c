@@ -139,6 +139,12 @@ static void test_emoji_selector(void)
           "a heart with a selector is two columns, got %zu",
           fymd_str_width("\xe2\x9d\xa4\xef\xb8\x8f", 6));
     CHECK(fymd_str_width("\xe2\x9d\xa4", 3) == 1, "a bare heart is one column");
+    /* U+2605 has no emoji form, so the selector does not widen it */
+    CHECK(fymd_cp_width_next(0x2605, 0xfe0f) == 0,
+          "a selector adds nothing to a black star");
+    CHECK(fymd_str_width("\xe2\x98\x85\xef\xb8\x8f", 6) == 1,
+          "a black star with a selector is one column, got %zu",
+          fymd_str_width("\xe2\x98\x85\xef\xb8\x8f", 6));
 }
 
 int main(void)
