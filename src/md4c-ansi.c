@@ -3128,7 +3128,24 @@ ui_marker(MD_ANSI* r, const char* kind, const char* arg, size_t arg_len, int dir
 static void ui_slot_inline(MD_ANSI* r, const MD_UI_TAG* t);
 static void ui_size_parse(const char* s, size_t n, int* kind, int* val);
 
-/* An inline fy-* tag: fill, act, role, glyph or slot. */
+/* The most blanks that one fy-space draws. */
+#define MD_UI_SPACE_MAX 1024
+
+/* The blanks of fy-space n="N": one when N is not given, none when it is 0. */
+static int
+ui_space_count(const MD_UI_TAG* t)
+{
+    const char* v;
+    size_t vl;
+    int kind, n = 1;
+
+    v = md_ui_tag_attr(t, "n", &vl);
+    if(v != NULL)
+        ui_size_parse(v, vl, &kind, &n);
+    return n > MD_UI_SPACE_MAX ? MD_UI_SPACE_MAX : n;
+}
+
+/* An inline fy-* tag: fill, act, role, glyph, space or slot. */
 static void
 ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
@@ -3214,6 +3231,14 @@ ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
         v = md_ui_tag_attr(&t, "fallback", &vl);
         if(v != NULL)
             render_verbatim(r, v, (MD_SIZE) vl);
+    } else if(md_ui_tag_is(&t, "space")) {
+        int n;
+
+        if(t.closing)
+            return;
+        /* blanks that Markdown does not remove at the start of a row */
+        for(n = ui_space_count(&t); n > 0; n--)
+            render_verbatim(r, " ", 1);
     } else if(md_ui_tag_is(&t, "slot")) {
         if(!t.closing)
             ui_slot_inline(r, &t);
@@ -4033,8 +4058,29 @@ ui_grid_emit(MD_ANSI* r)
     r->need_newline = 1;
 }
 
-/* The fy-* tags of an HTML block: columns, grid, vfill, scroll, drop, tight
- * and slot. */
+/* A row that holds only the blanks of fy-space: a blank row of the page. */
+static void
+ui_space_block(MD_ANSI* r, const MD_UI_TAG* t)
+{
+    int n;
+
+    if(r->line_open)
+        flush_wrapped(r);
+    if(r->need_newline) {
+        render_separator(r);
+        r->need_newline = 0;
+    }
+    render_indent(r);
+    /* a blank row is a row: a column must not trim it */
+    ui_marker(r, "keep", NULL, 0, 1);
+    for(n = ui_space_count(t); n > 0; n--)
+        out_direct(r, " ", 1);
+    out_direct(r, "\n", 1);
+    r->need_newline = 1;
+}
+
+/* The fy-* tags of an HTML block: columns, grid, vfill, scroll, drop, tight,
+ * space and slot. */
 static void
 ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
 {
@@ -4144,6 +4190,8 @@ ui_block_tags(MD_ANSI* r, const char* text, MD_SIZE size)
                 n = snprintf(arg, sizeof(arg), "%d", order);
                 ui_row_marker(r, "drop", arg, (size_t) n);
             }
+        } else if(md_ui_tag_is(&t, "space") && !t.closing) {
+            ui_space_block(r, &t);
         } else if(md_ui_tag_is(&t, "slot") && !t.closing) {
             ui_slot_block(r, &t);
         }
