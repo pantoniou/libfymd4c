@@ -331,6 +331,11 @@ int fymd_render_with_margins(struct fymd_renderer *r,
  *                                text in a palette role
  *   <fy-glyph name="NAME" fallback="TEXT"/>
  *                                a palette glyph, or the fallback text
+ *   <fy-mark id="ID"/>
+ *                                a position, reported as a region of no
+ *                                columns
+ *   <fy-space n="N"/>
+ *                                N blanks that the start of a row keeps
  *   <fy-slot id="ID" width="N"/>
  *                                N cells that another component draws
  *
@@ -358,7 +363,8 @@ int fymd_render_with_margins(struct fymd_renderer *r,
 
 enum fymd_region_kind {
     FYMD_REGION_ACT = 0,   /* the label of an fy-act: clickable, one row */
-    FYMD_REGION_SLOT       /* an fy-slot: cells that another component draws */
+    FYMD_REGION_SLOT,      /* an fy-slot: cells that another component draws */
+    FYMD_REGION_MARK       /* an fy-mark: a position of one row, no columns */
 };
 
 /* A region of the last one-shot render. An fy-act label that wraps has one

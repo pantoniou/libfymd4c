@@ -25,7 +25,8 @@ extern "C" {
 
 typedef enum {
     MD_UI_REGION_ACT,           /* the label of an fy-act, one row */
-    MD_UI_REGION_SLOT           /* an fy-slot that another component draws */
+    MD_UI_REGION_SLOT,          /* an fy-slot that another component draws */
+    MD_UI_REGION_MARK           /* an fy-mark: a position, no columns */
 } MD_UI_REGION_KIND;
 
 /* A region of the output. The id is owned. */

@@ -40,7 +40,7 @@ md_ui_region_add(MD_ANSI_UI* ui, const char* id, size_t id_len, size_t row,
     char* copy;
     size_t na;
 
-    if(ui == NULL || width <= 0)
+    if(ui == NULL || width < 0 || (width == 0 && kind != MD_UI_REGION_MARK))
         return 0;
     if(ui->count == ui->alloc) {
         na = ui->alloc ? ui->alloc * 2 : 16;

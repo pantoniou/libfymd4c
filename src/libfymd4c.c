@@ -914,8 +914,10 @@ fymd_renderer_get_regions(struct fymd_renderer *r,
         r->regions[i].col = r->ui.regions[i].col;
         r->regions[i].width = r->ui.regions[i].width;
         r->regions[i].height = r->ui.regions[i].height;
-        r->regions[i].kind = r->ui.regions[i].kind == MD_UI_REGION_SLOT ?
-                             FYMD_REGION_SLOT : FYMD_REGION_ACT;
+        r->regions[i].kind =
+            r->ui.regions[i].kind == MD_UI_REGION_SLOT ? FYMD_REGION_SLOT :
+            r->ui.regions[i].kind == MD_UI_REGION_MARK ? FYMD_REGION_MARK :
+            FYMD_REGION_ACT;
     }
     *regions = r->regions;
     *count = r->ui.count;

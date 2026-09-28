@@ -549,6 +549,10 @@ out_sink(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
                                         r->ui_col - r->ui_act_seg,
                                         1, MD_UI_REGION_ACT);
             r->ui_act = 0;
+        } else if(md_ui_marker_is(kind, kl, "mark")) {
+            /* a position that takes no columns */
+            (void) md_ui_region_add(r->ui, arg, al, r->output_row, r->ui_col,
+                                    0, 1, MD_UI_REGION_MARK);
         } else if(md_ui_marker_is(kind, kl, "keep")) {
             /* holds a blank row of a slot through a column; ends here */
         } else if(md_ui_marker_is(kind, kl, "slot")) {
@@ -3145,7 +3149,7 @@ ui_space_count(const MD_UI_TAG* t)
     return n > MD_UI_SPACE_MAX ? MD_UI_SPACE_MAX : n;
 }
 
-/* An inline fy-* tag: fill, act, role, glyph, space or slot. */
+/* An inline fy-* tag: fill, act, role, glyph, mark, space or slot. */
 static void
 ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
@@ -3231,6 +3235,12 @@ ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
         v = md_ui_tag_attr(&t, "fallback", &vl);
         if(v != NULL)
             render_verbatim(r, v, (MD_SIZE) vl);
+    } else if(md_ui_tag_is(&t, "mark")) {
+        if(t.closing)
+            return;
+        v = md_ui_tag_attr(&t, "id", &vl);
+        if(v != NULL && md_ui_id_valid(v, vl))
+            ui_marker(r, "mark", v, vl, 0);
     } else if(md_ui_tag_is(&t, "space")) {
         int n;
 
