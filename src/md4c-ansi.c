@@ -617,9 +617,17 @@ out_bubble(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
                 BUBBLE_WRITE(bg, strlen(bg));
                 r->code_bubble_started = 1;
             }
-            BUBBLE_WRITE(text + i, e);
-            r->code_bubble_col += cp == '\t' ? 8 - r->code_bubble_col % 8 :
-                                  fymd_cp_width_next(prev, cp);
+            if(cp == '\t') {
+                /* A raw tab moves to a stop of the terminal and paints no
+                 * background: the stop is drawn as blanks on the bubble. */
+                do {
+                    BUBBLE_WRITE(" ", 1);
+                    r->code_bubble_col++;
+                } while(r->code_bubble_col % 8);
+            } else {
+                BUBBLE_WRITE(text + i, e);
+                r->code_bubble_col += fymd_cp_width_next(prev, cp);
+            }
             prev = cp;
         }
         i += e;
