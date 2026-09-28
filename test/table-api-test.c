@@ -145,8 +145,53 @@ static void test_unlimited_width_keeps_the_table_left(void)
           left.lead);
 }
 
+/* The blanks between the last byte of @needle and the next separator. */
+static int pad_after(const char *out, const char *needle)
+{
+    const char *p = strstr(out, needle);
+    int n = 0;
+
+    if (!p)
+        return -1;
+    for (p += strlen(needle); *p == ' '; p++)
+        n++;
+    return n;
+}
+
+/* A cell with a heart and U+FE0F is one column wider than a bare heart, so it
+ * takes one blank less to reach the column separator. */
+static void test_emoji_selector_cell(void)
+{
+    static const char md[] =
+        "| a |\n|---|\n| x \xe2\x9d\xa4\xef\xb8\x8f |\n| x \xe2\x9d\xa4 |\n";
+    struct fymd_renderer_cfg cfg;
+    struct fymd_renderer *r;
+    char *out;
+    int wide, bare;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.width = 40;
+    cfg.flags = FYMD_RF_NO_COLOR;
+    r = fymd_renderer_create(&cfg);
+    CHECK(r, "a renderer is made");
+    if (!r)
+        return;
+    out = fymd_render_to_string(r, md, sizeof(md) - 1);
+    fymd_renderer_destroy(r);
+    CHECK(out, "the table renders");
+    if (!out)
+        return;
+    wide = pad_after(out, "x \xe2\x9d\xa4\xef\xb8\x8f");
+    bare = pad_after(out, "x \xe2\x9d\xa4 ");
+    /* The needle of the bare cell takes its first blank. */
+    CHECK(wide >= 0 && bare >= 0 && wide == bare,
+          "the selector cell pads %d blanks, the bare cell %d + 1", wide, bare);
+    fymd_free(out);
+}
+
 int main(void)
 {
+    test_emoji_selector_cell();
     test_fit_places_the_table();
     test_place_needs_fit();
     test_unlimited_width_keeps_the_table_left();

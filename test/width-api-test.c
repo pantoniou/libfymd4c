@@ -122,11 +122,31 @@ static void test_str_width(void)
           fymd_str_width("\xe4\xb8\x80", 2));
 }
 
+/* U+FE0F makes a one-column emoji base two columns, as a terminal draws it */
+static void test_emoji_selector(void)
+{
+    CHECK(fymd_cp_width_next(0x2764, 0xfe0f) == 1,
+          "a selector widens a one-column heart");
+    CHECK(fymd_cp_width_next(0x1f600, 0xfe0f) == 0,
+          "a selector adds nothing to a wide emoji");
+    CHECK(fymd_cp_width_next('a', 0xfe0f) == 0,
+          "a selector adds nothing to a letter");
+    CHECK(fymd_cp_width_next(0, 0xfe0f) == 0,
+          "a selector with nothing before it adds nothing");
+    CHECK(fymd_cp_width_next(0xfe0f, 'a') == 1,
+          "a codepoint after a selector keeps its width");
+    CHECK(fymd_str_width("\xe2\x9d\xa4\xef\xb8\x8f", 6) == 2,
+          "a heart with a selector is two columns, got %zu",
+          fymd_str_width("\xe2\x9d\xa4\xef\xb8\x8f", 6));
+    CHECK(fymd_str_width("\xe2\x9d\xa4", 3) == 1, "a bare heart is one column");
+}
+
 int main(void)
 {
     test_cp_width();
     test_utf8_decode();
     test_str_width();
+    test_emoji_selector();
 
     if (failures) {
         fprintf(stderr, "%d check(s) failed\n", failures);
