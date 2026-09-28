@@ -221,6 +221,74 @@ out:
     fypal_ctx_destroy(palette);
 }
 
+/* The columns of the row of @out that holds @needle, escapes left out. */
+static int
+row_cols(const char *out, const char *needle)
+{
+    const char *p = out ? strstr(out, needle) : NULL;
+    const char *start, *end;
+    unsigned int cp;
+    size_t n;
+    int cols = 0;
+
+    if(p == NULL)
+        return -1;
+    for(start = p; start > out && start[-1] != '\n'; start--)
+        ;
+    end = strchr(p, '\n');
+    if(end == NULL)
+        end = p + strlen(p);
+    for(p = start; p < end; ) {
+        if(*p == '\033') {
+            for(p++; p < end && !(*p >= '@' && *p <= '~' && *p != '['); p++)
+                ;
+            if(p < end)
+                p++;
+            continue;
+        }
+        n = fymd_utf8_decode(p, (size_t)(end - p), &cp);
+        cols += fymd_cp_width(cp);
+        p += n;
+    }
+    return cols;
+}
+
+/* A tab of a code bubble is drawn as blanks on the wash, in a quote too, so
+ * its row ends where the other rows of the bubble end. */
+static void
+test_code_tab(void)
+{
+    static const char input[] = "> ```\n> a\tb\n> x\n> ```\n";
+    struct fypal_caps caps = { .depth = FYPAL_DEPTH_TRUECOLOR, .attrs = FYPAL_ATTR_ALL };
+    struct fypal_ctx *palette = fypal_ctx_create(&caps);
+    struct fymd_renderer *r = renderer(0);
+    char *out = NULL;
+    size_t len;
+    int tab, plain;
+
+    CHECK(palette && r);
+    if(!palette || !r)
+        goto out;
+    CHECK(fypal_ctx_load(palette,
+          "colors: {rule: '#123456', faint: '#abcdef'}\n", "rules") == 0);
+    CHECK(fypal_ctx_set_param_string(palette, "md.code.rules", FYPAL_SECTION_ALL,
+                                    "bubble-rule-faint") == 0);
+    CHECK(fymd_renderer_set_palette(r, palette) == 0);
+    CHECK(fymd_render(r, input, strlen(input), &out, &len) == 0);
+    expect(__LINE__, out, "b", "\t");
+    tab = row_cols(out, "b");
+    plain = row_cols(out, "x");
+    if(tab < 0 || tab != plain) {
+        fprintf(stderr, "%s:%d: the tab row is %d columns, the other %d\n",
+                __FILE__, __LINE__, tab, plain);
+        failures++;
+    }
+out:
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+    fypal_ctx_destroy(palette);
+}
+
 int
 main(void)
 {
@@ -238,6 +306,7 @@ main(void)
     size_t len;
 
     test_code_rules();
+    test_code_tab();
 
     palette = fypal_ctx_create(&caps);
     if(palette == NULL || fypal_ctx_load(palette, theme, "test") != 0) {
