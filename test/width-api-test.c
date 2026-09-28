@@ -147,12 +147,34 @@ static void test_emoji_selector(void)
           fymd_str_width("\xe2\x98\x85\xef\xb8\x8f", 6));
 }
 
+static int narrow_heart(unsigned int base)
+{
+    return base == 0x2764 ? 1 : 0;
+}
+
+/* A glyph the host measured as one column is one column */
+static void test_measured_glyph(void)
+{
+    fymd_set_glyph_width(narrow_heart);
+    CHECK(fymd_cp_width_next(0x2764, 0xfe0f) == 0,
+          "a selector adds nothing to a heart measured narrow");
+    CHECK(fymd_str_width("\xe2\x9d\xa4\xef\xb8\x8f", 6) == 1,
+          "a heart measured narrow is one column, got %zu",
+          fymd_str_width("\xe2\x9d\xa4\xef\xb8\x8f", 6));
+    CHECK(fymd_cp_width_next(0x2708, 0xfe0f) == 1,
+          "a glyph not measured keeps two columns");
+    fymd_set_glyph_width(NULL);
+    CHECK(fymd_cp_width_next(0x2764, 0xfe0f) == 1,
+          "without the hook a heart is two columns again");
+}
+
 int main(void)
 {
     test_cp_width();
     test_utf8_decode();
     test_str_width();
     test_emoji_selector();
+    test_measured_glyph();
 
     if (failures) {
         fprintf(stderr, "%d check(s) failed\n", failures);
