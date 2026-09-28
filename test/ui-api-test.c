@@ -910,6 +910,43 @@ test_space(void)
 }
 
 static void
+test_mark(void)
+{
+    const struct fymd_region *rg;
+    struct fymd_renderer *r;
+    char *out, *ref;
+    size_t count, i;
+    int found = 0;
+
+    r = renderer(1, 40, 0);
+
+    /* a mark takes no column and reports its row and column */
+    out = render(r, "<fy-tight>\n\nabc\n\nx<fy-mark id=\"m:1\"/>yz\n\n");
+    CHECK(fymd_renderer_get_regions(r, &rg, &count) == 0);
+    for(i = 0; i < count; i++)
+        if(rg[i].kind == FYMD_REGION_MARK && !strcmp(rg[i].id, "m:1")) {
+            CHECK(rg[i].row == 1 && rg[i].col == 3 && rg[i].width == 0 &&
+                  rg[i].height == 1);
+            found++;
+        }
+    CHECK(found == 1);
+    ref = render(r, "<fy-tight>\n\nabc\n\nxyz\n\n");
+    CHECK(out != NULL && ref != NULL && strcmp(out, ref) == 0);
+    fymd_free(ref);
+    fymd_free(out);
+
+    /* a mark in a dropped body is not reported */
+    fymd_renderer_set_height(r, 1);
+    out = render(r, "<fy-tight>\n\n<fy-drop>\n\n<fy-mark id=\"gone\"/>xxx\n\n"
+                    "</fy-drop>\n\nyyy\n\n</fy-tight>\n");
+    CHECK(fymd_renderer_get_regions(r, &rg, &count) == 0);
+    for(i = 0; i < count; i++)
+        CHECK(strcmp(rg[i].id, "gone") != 0);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+}
+
+static void
 test_tight(void)
 {
     const struct fymd_region *rg;
@@ -1162,6 +1199,7 @@ main(void)
 {
     test_fill();
     test_space();
+    test_mark();
     test_table_fill();
     test_regions();
     test_role_glyph();
