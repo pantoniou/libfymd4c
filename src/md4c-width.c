@@ -79,14 +79,32 @@ static const CP_RANGE emoji_vs_ranges[] = {
 #include "md4c-emoji-vs.h"
 };
 
+/* What the terminal gives an emoji base that U+FE0F selects, when the host
+ * measured it: one terminal serves the process, so the hook is global. */
+static int (*glyph_width_fn)(unsigned int base);
+
+void
+fymd_set_glyph_width(int (*fn)(unsigned int base))
+{
+    glyph_width_fn = fn;
+}
+
 int
 fymd_cp_width_next(unsigned int prev, unsigned int cp)
 {
-    if(cp == 0xfe0f)
-        return fymd_cp_width(prev) == 1 &&
-               cp_range_contains(emoji_vs_ranges,
-                   (int)(sizeof(emoji_vs_ranges)/sizeof(emoji_vs_ranges[0])),
-                   prev);
+    int w;
+
+    if(cp == 0xfe0f) {
+        if(fymd_cp_width(prev) != 1 ||
+           !cp_range_contains(emoji_vs_ranges,
+                (int)(sizeof(emoji_vs_ranges)/sizeof(emoji_vs_ranges[0])),
+                prev))
+            return 0;
+        /* A measured glyph takes what the terminal gave it; one that is
+         * not known takes two columns. */
+        w = glyph_width_fn ? glyph_width_fn(prev) : 0;
+        return w == 1 ? 0 : 1;
+    }
     return fymd_cp_width(cp);
 }
 

@@ -70,6 +70,19 @@ int fymd_cp_width_next(unsigned int prev, unsigned int cp)
 	FYMD_EXPORT;
 
 /**
+ * fymd_set_glyph_width() - take the widths the terminal gives emoji glyphs
+ * @fn: returns the columns the terminal gave an emoji base that U+FE0F
+ *      selects: 1, 2, or 0 when it is not known; NULL for none
+ *
+ * Terminals draw such a glyph in one column or two. A host that measured
+ * what its terminal does gives the measure here, and the selector adds a
+ * column only for a glyph measured as two or not measured. The setting is
+ * for the process, as the terminal is.
+ */
+void fymd_set_glyph_width(int (*fn)(unsigned int base))
+	FYMD_EXPORT;
+
+/**
  * fymd_str_width() - the columns a UTF-8 string occupies
  * @s: the text, which need not be NUL terminated
  * @len: its length in bytes, or (size_t)-1 to measure to the NUL
