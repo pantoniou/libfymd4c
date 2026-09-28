@@ -208,6 +208,7 @@ Inline tags:
 | `<fy-act id="ID">label</fy-act>` | A clickable label, styled by the `action` pair or the `md.action` role. The id holds letters, digits and `_-.:/`, 1 to 63 bytes; a tag with another id is ignored. |
 | `<fy-role name="ROLE">text</fy-role>` | Text in a role of the palette. Without a palette, or without the role, the text is plain. |
 | `<fy-glyph name="NAME" fallback="TEXT"/>` | A glyph of the palette, in the form that `FYMD_PF_ASCII` selects, else the fallback text. |
+| `<fy-mark id="ID"/>` | A position: a region of kind `FYMD_REGION_MARK` at its row and column, with no columns. It draws nothing and moves nothing, so a tool can find where a row or a part of it starts. A mark in a dropped body is not reported. |
 | `<fy-space n="N"/>` | N blanks, one when `n` is not given. Markdown keeps them at the start of a row, where it removes plain blanks and where four of them start a code block, so a margin is `<fy-space n="4"/>`. |
 | `<fy-slot id="ID" width="N"/>` | N cells that another component draws (see [Slots](#slots)). The cells do not break across rows. |
 
@@ -269,8 +270,8 @@ After `fymd_render()` or `fymd_render_with_margins()`,
 `fymd_renderer_get_regions()` lists the clickable regions, and
 `fymd_renderer_region_at(r, row, col)` returns the id at a cell. A region has
 the row and the columns of the output, after wrapping, columns and the vertical
-layout. A label that wraps has one region for each row. A render with a line
-limit reports no regions.
+layout. A label that wraps has one region for each row. A mark has a width of
+0, so no cell is in it. A render with a line limit reports no regions.
 
 Give model output the flag only when the model may draw such chrome: with the
 flag, a response can place labels and layout like the application does.
