@@ -208,6 +208,7 @@ Inline tags:
 | `<fy-act id="ID">label</fy-act>` | A clickable label, styled by the `action` pair or the `md.action` role. The id holds letters, digits and `_-.:/`, 1 to 63 bytes; a tag with another id is ignored. |
 | `<fy-role name="ROLE">text</fy-role>` | Text in a role of the palette. Without a palette, or without the role, the text is plain. |
 | `<fy-glyph name="NAME" fallback="TEXT"/>` | A glyph of the palette, in the form that `FYMD_PF_ASCII` selects, else the fallback text. |
+| `<fy-space n="N"/>` | N blanks, one when `n` is not given. Markdown keeps them at the start of a row, where it removes plain blanks and where four of them start a code block, so a margin is `<fy-space n="4"/>`. |
 | `<fy-slot id="ID" width="N"/>` | N cells that another component draws (see [Slots](#slots)). The cells do not break across rows. |
 
 Block tags, each on a line of its own, with a blank line before the Markdown
@@ -238,6 +239,7 @@ Left column.
 | `<fy-cell row="R" col="C" rowspan="N" colspan="N">` ... `</fy-cell>` | A block of an `fy-grid`, rendered at the width of the columns it spans with the gaps between them. A cell that spans rows gives each row its next rows, and a fitted row grows for a cell taller than the rows it spans. Content taller than the cell is cut. A cell without `row` and `col`, outside the grid or over another cell is not drawn. |
 | `<fy-tight>` ... `</fy-tight>` | Blocks on adjacent rows: no blank row separates the blocks inside it, as a page of chrome needs. An unclosed `fy-tight` runs to the end of the document, and a close without an open is ignored. |
 | `<fy-drop order="N">` ... `</fy-drop>` | A body that goes whole when the page is too tall, before a scroll body gives up rows. The lowest order goes first, and of equal orders the later body; the order defaults to 0. A body without its close is not a body, and bodies do not nest. A region in a dropped body is not reported, and an elastic slot there has a height of 0. |
+| `<fy-space n="N"/>` | A row that holds only N blanks: a blank row, which Markdown otherwise does not keep. In `fy-tight` it is the one way to state a blank row. |
 | `<fy-slot id="ID" height="N\|N*" min="M"/>` | Rows that another component draws, at the width of the page or of the column (see [Slots](#slots)). |
 
 #### Weights and minimums
