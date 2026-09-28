@@ -72,6 +72,24 @@ fymd_cp_width(unsigned int cp)
     return 1;
 }
 
+/* Codepoints that a terminal draws as an emoji when U+FE0F follows them. */
+static int
+cp_emoji_base(unsigned cp)
+{
+    return (cp >= 0x2300 && cp <= 0x23ff) ||
+           (cp >= 0x2600 && cp <= 0x27bf) ||
+           (cp >= 0x1f000 && cp <= 0x1faff) ||
+           cp == 0x00a9 || cp == 0x00ae;
+}
+
+int
+fymd_cp_width_next(unsigned int prev, unsigned int cp)
+{
+    if(cp == 0xfe0f)
+        return cp_emoji_base(prev) && fymd_cp_width(prev) == 1;
+    return fymd_cp_width(cp);
+}
+
 size_t
 fymd_utf8_decode(const char* s, size_t len, unsigned int* cp)
 {
@@ -118,7 +136,7 @@ size_t
 fymd_str_width(const char* s, size_t len)
 {
     size_t i = 0, w = 0;
-    unsigned int cp;
+    unsigned int cp, prev = 0;
 
     if(s == NULL)
         return 0;
@@ -130,7 +148,8 @@ fymd_str_width(const char* s, size_t len)
 
     while(i < len) {
         i += fymd_utf8_decode(s + i, len - i, &cp);
-        w += (size_t) fymd_cp_width(cp);
+        w += (size_t) fymd_cp_width_next(prev, cp);
+        prev = cp;
     }
     return w;
 }

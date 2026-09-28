@@ -53,11 +53,26 @@ int fymd_cp_width(unsigned int cp)
 	FYMD_EXPORT;
 
 /**
+ * fymd_cp_width_next() - the columns a codepoint adds after another
+ * @prev: the codepoint before @cp, or 0 when there is none
+ * @cp: the codepoint to measure
+ *
+ * A variation selector 16 (U+FE0F) asks for the emoji presentation of the
+ * codepoint before it. A terminal draws a one-column emoji base, such as
+ * U+2764, as two columns then, thus the selector adds one column. Every other
+ * codepoint adds fymd_cp_width().
+ *
+ * Returns: 0, 1 or 2.
+ */
+int fymd_cp_width_next(unsigned int prev, unsigned int cp)
+	FYMD_EXPORT;
+
+/**
  * fymd_str_width() - the columns a UTF-8 string occupies
  * @s: the text, which need not be NUL terminated
  * @len: its length in bytes, or (size_t)-1 to measure to the NUL
  *
- * Sums fymd_cp_width() over the codepoints of @s. A malformed byte counts as
+ * Sums fymd_cp_width_next() over the codepoints of @s. A malformed byte counts as
  * one column, so a broken encoding cannot make the measure run away.
  *
  * Returns: the width in columns, or 0 when @s is NULL.

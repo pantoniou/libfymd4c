@@ -472,7 +472,7 @@ ui_track(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
     size_t row = r->output_row;
     MD_SIZE i = 0, e, cl;
-    unsigned cp;
+    unsigned cp, prev = 0;
 
     while(i < size) {
         if(text[i] == '\n') {
@@ -495,7 +495,8 @@ ui_track(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
         cl = ansi_utf8_decode(text + i, size - i, &cp);
         if(r->ui_act && r->ui_act_seg < 0 && cp != ' ')
             r->ui_act_seg = r->ui_col;
-        r->ui_col += fymd_cp_width(cp);
+        r->ui_col += fymd_cp_width_next(prev, cp);
+        prev = cp;
         i += cl ? cl : 1;
     }
 }
@@ -574,6 +575,7 @@ static void
 out_bubble(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
     MD_SIZE i = 0, e, written = 0;
+    unsigned prev = 0;
     int color = !(r->flags & MD_ANSI_FLAG_NO_COLOR);
     int width = (r->wrap_cols > 0 ? r->wrap_cols : table_term_width()) - DOC_MARGIN;
     const char* bg = r->style->code_bubble_on;
@@ -616,7 +618,9 @@ out_bubble(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
                 r->code_bubble_started = 1;
             }
             BUBBLE_WRITE(text + i, e);
-            r->code_bubble_col += cp == '\t' ? 8 - r->code_bubble_col % 8 : fymd_cp_width(cp);
+            r->code_bubble_col += cp == '\t' ? 8 - r->code_bubble_col % 8 :
+                                  fymd_cp_width_next(prev, cp);
+            prev = cp;
         }
         i += e;
     }
@@ -1385,6 +1389,7 @@ static int
 ansi_disp_width(const char* buf, MD_SIZE size)
 {
     MD_SIZE i = 0;
+    unsigned prev = 0;
     int w = 0;
     while(i < size) {
         MD_SIZE e = ansi_esc_len(buf + i, size - i);
@@ -1392,7 +1397,8 @@ ansi_disp_width(const char* buf, MD_SIZE size)
         MD_SIZE cl;
         if(e > 0) { i += e; continue; }
         cl = ansi_utf8_decode(buf + i, size - i, &cp);
-        w += fymd_cp_width(cp);
+        w += fymd_cp_width_next(prev, cp);
+        prev = cp;
         i += cl;
     }
     return w;
@@ -1565,6 +1571,7 @@ wrap_text(const char* buf, MD_SIZE size, int width, int* n_out)
     TLINE* lines = NULL;
     int n = 0, cap = 0;
     MD_SIZE i = 0, line_start = 0, last_space = (MD_SIZE) -1;
+    unsigned prev = 0;
     int line_w = 0, w_at_space = 0;
 
     if(width < 1)
@@ -1591,7 +1598,8 @@ wrap_text(const char* buf, MD_SIZE size, int width, int* n_out)
         if(e > 0) { i += e; continue; }     /* escape stays on the current line */
 
         cl = ansi_utf8_decode(buf + i, size - i, &cp);
-        cw = fymd_cp_width(cp);
+        cw = fymd_cp_width_next(prev, cp);
+        prev = cp;
 
         if(cp == ' ') {
             last_space = i;
@@ -2099,14 +2107,16 @@ static MD_SIZE
 ansi_clip_bytes(const char* buf, MD_SIZE size, int width)
 {
     MD_SIZE i = 0;
+    unsigned prev = 0;
     int w = 0;
     while(i < size) {
         unsigned cp;
         MD_SIZE cl = ansi_utf8_decode(buf + i, size - i, &cp);
-        int cw = fymd_cp_width(cp);
+        int cw = fymd_cp_width_next(prev, cp);
         if(w + cw > width)
             break;
         w += cw;
+        prev = cp;
         i += cl;
     }
     return i;
@@ -3524,7 +3534,7 @@ static MD_SIZE
 ui_clip_cols(const char* buf, MD_SIZE size, int width)
 {
     MD_SIZE i = 0, e, cl;
-    unsigned cp;
+    unsigned cp, prev = 0;
     int w = 0, cw;
 
     while(i < size) {
@@ -3534,10 +3544,11 @@ ui_clip_cols(const char* buf, MD_SIZE size, int width)
             continue;
         }
         cl = ansi_utf8_decode(buf + i, size - i, &cp);
-        cw = fymd_cp_width(cp);
+        cw = fymd_cp_width_next(prev, cp);
         if(w + cw > width)
             break;
         w += cw;
+        prev = cp;
         i += cl ? cl : 1;
     }
     return i;
