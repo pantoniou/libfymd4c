@@ -58,8 +58,10 @@ int fymd_cp_width(unsigned int cp)
  * @cp: the codepoint to measure
  *
  * A variation selector 16 (U+FE0F) asks for the emoji presentation of the
- * codepoint before it. A terminal draws a one-column emoji base, such as
- * U+2764, as two columns then, thus the selector adds one column. Every other
+ * codepoint before it, when Unicode lists that codepoint in its emoji
+ * variation sequences. A terminal draws such a one-column codepoint, such as
+ * U+2764, as two columns then, thus the selector adds one column. After any
+ * other codepoint, such as U+2605, the selector adds none. Every other
  * codepoint adds fymd_cp_width().
  *
  * Returns: 0, 1 or 2.

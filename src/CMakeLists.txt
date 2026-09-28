@@ -24,6 +24,12 @@ else()
     endif()
 endif()
 
+# The codepoints that U+FE0F widens, from the Unicode emoji data.
+include("${CMAKE_CURRENT_SOURCE_DIR}/../cmake/EmojiVariation.cmake")
+emoji_variation_table(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/unicode/emoji-variation-sequences.txt"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/md4c-emoji-vs.h")
+
 # Embed the default styling YAML as a C byte array.
 set(_md4c_style_yaml "${CMAKE_CURRENT_SOURCE_DIR}/../stylings/md4c-default.yaml")
 set(_md4c_style_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/md4c_default_style.inc")

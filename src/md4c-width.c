@@ -72,21 +72,21 @@ fymd_cp_width(unsigned int cp)
     return 1;
 }
 
-/* Codepoints that a terminal draws as an emoji when U+FE0F follows them. */
-static int
-cp_emoji_base(unsigned cp)
-{
-    return (cp >= 0x2300 && cp <= 0x23ff) ||
-           (cp >= 0x2600 && cp <= 0x27bf) ||
-           (cp >= 0x1f000 && cp <= 0x1faff) ||
-           cp == 0x00a9 || cp == 0x00ae;
-}
+/* Codepoints that U+FE0F asks to draw in emoji presentation. CMake makes the
+ * table from scripts/unicode/emoji-variation-sequences.txt when the project
+ * is configured; replace that file for a Unicode bump. */
+static const CP_RANGE emoji_vs_ranges[] = {
+#include "md4c-emoji-vs.h"
+};
 
 int
 fymd_cp_width_next(unsigned int prev, unsigned int cp)
 {
     if(cp == 0xfe0f)
-        return cp_emoji_base(prev) && fymd_cp_width(prev) == 1;
+        return fymd_cp_width(prev) == 1 &&
+               cp_range_contains(emoji_vs_ranges,
+                   (int)(sizeof(emoji_vs_ranges)/sizeof(emoji_vs_ranges[0])),
+                   prev);
     return fymd_cp_width(cp);
 }
 
