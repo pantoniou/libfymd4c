@@ -855,6 +855,61 @@ test_drop(void)
 }
 
 static void
+test_space(void)
+{
+    struct fymd_renderer *r;
+    char *out, *ref;
+
+    r = renderer(1, 40, 0);
+
+    /* a margin at the start of a row stays, as the entity of a space does */
+    out = render(r, "<fy-space n=\"2\"/>x\n");
+    ref = render(r, "&#32;&#32;x\n");
+    CHECK(out != NULL && ref != NULL && strcmp(out, ref) == 0);
+    if(out == NULL || ref == NULL || strcmp(out, ref) != 0)
+        dump("space margin", out);
+    fymd_free(ref);
+    fymd_free(out);
+
+    /* four blanks make no code block */
+    out = render(r, "<fy-space n=\"4\"/>x\n");
+    ref = render(r, "&#32;&#32;&#32;&#32;x\n");
+    CHECK(out != NULL && ref != NULL && strcmp(out, ref) == 0);
+    fymd_free(ref);
+    fymd_free(out);
+
+    /* no n is one blank, and n="0" is none */
+    out = render(r, "<fy-space/>x\n");
+    ref = render(r, "&#32;x\n");
+    CHECK(out != NULL && ref != NULL && strcmp(out, ref) == 0);
+    fymd_free(ref);
+    fymd_free(out);
+    out = render(r, "<fy-space n=\"0\"/>x\n");
+    ref = render(r, "x\n");
+    CHECK(out != NULL && ref != NULL && strcmp(out, ref) == 0);
+    fymd_free(ref);
+    fymd_free(out);
+
+    /* on a line of its own it is a blank row of fy-tight */
+    out = render(r, "<fy-tight>\n\naaa\n\n<fy-space/>\n\n<fy-space/>\n\n"
+                    "bbb\n\n</fy-tight>\n");
+    CHECK(row_of(out, "aaa") == 0 && row_of(out, "bbb") == 3);
+    if(row_of(out, "bbb") != 3)
+        dump("space row", out);
+    fymd_free(out);
+
+    /* a blank row in a drop body goes with the body */
+    fymd_renderer_set_height(r, 1);
+    out = render(r, "<fy-tight>\n\n<fy-drop>\n\n<fy-space/>\n\n</fy-drop>\n\n"
+                    "yyy\n\n</fy-tight>\n");
+    CHECK(out != NULL && row_of(out, "yyy") == 0 && rows(out) <= 1);
+    if(out == NULL || rows(out) > 1)
+        dump("space drop", out);
+    fymd_free(out);
+    fymd_renderer_destroy(r);
+}
+
+static void
 test_tight(void)
 {
     const struct fymd_region *rg;
@@ -1106,6 +1161,7 @@ int
 main(void)
 {
     test_fill();
+    test_space();
     test_table_fill();
     test_regions();
     test_role_glyph();
