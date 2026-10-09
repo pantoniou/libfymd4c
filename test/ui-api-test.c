@@ -412,6 +412,19 @@ test_palette(void)
         dump("palette role and glyph", out);
     fymd_free(out);
 
+    /* an act takes a role of the palette in place of the action style, and is
+     * plain when the palette has no such role */
+    out = render(r, "<fy-act id=\"a\" role=\"tool.ok\">go</fy-act> "
+                    "<fy-act id=\"b\" role=\"nope\">plain</fy-act> "
+                    "<fy-act id=\"c\">act</fy-act>\n");
+    CHECK(out != NULL && strstr(out, "38;2;16;32;48mgo") != NULL);
+    CHECK(out != NULL && strstr(out, "plain") != NULL &&
+          strstr(out, "4mplain") == NULL);
+    CHECK(out != NULL && strstr(out, "4mact") != NULL);
+    if(out == NULL || strstr(out, "4mact") == NULL)
+        dump("act with a role", out);
+    fymd_free(out);
+
     CHECK(fymd_renderer_set_palette_flags(r, pal, FYMD_PF_ASCII) == 0);
     out = render(r, "<fy-glyph name=\"gutter.tool\" fallback=\"x\"/> go\n");
     CHECK(out != NULL && strstr(out, "-> go") != NULL);
