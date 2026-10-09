@@ -288,6 +288,8 @@ struct MD_ANSI_tag {
     int ui_act;                     /* inside an fy-act */
     int ui_act_seg;                 /* column the open region starts at, or -1 */
     char ui_act_id[64];
+    int ui_act_roled;               /* the open fy-act takes a role */
+    const char* ui_act_off;         /* the end of that role, or NULL */
     size_t ui_act_len;
     const char* ui_role_off[MD_UI_ROLE_MAX];
     int ui_role_depth;
@@ -3155,7 +3157,8 @@ ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
 {
     MD_UI_TAG t;
     const char* v;
-    size_t vl;
+    const char* rv;
+    size_t vl, rl;
 #ifdef MD4C_WITH_FYPALETTE
     const struct fypal_role* role;
     const char* glyph;
@@ -3181,12 +3184,38 @@ ui_inline_tag(MD_ANSI* r, const MD_CHAR* text, MD_SIZE size)
     } else if(md_ui_tag_is(&t, "act")) {
         if(t.closing) {
             ui_marker(r, "/act", NULL, 0, 0);
-            render_ansi(r, r->style->action.off);
+            if(!r->ui_act_roled)
+                render_ansi(r, r->style->action.off);
+            else if(r->ui_act_off != NULL)
+                render_ansi(r, r->ui_act_off);
+            r->ui_act_roled = 0;
+            r->ui_act_off = NULL;
         } else {
             v = md_ui_tag_attr(&t, "id", &vl);
             if(v == NULL || !md_ui_id_valid(v, vl))
                 return;
-            render_ansi(r, r->style->action.on);
+            r->ui_act_roled = 0;
+            r->ui_act_off = NULL;
+            /* role="NAME": the label takes that role of the palette in place
+             * of the action style, and is plain when there is no such role. */
+            rv = md_ui_tag_attr(&t, "role", &rl);
+            if(rv != NULL) {
+                r->ui_act_roled = 1;
+#ifdef MD4C_WITH_FYPALETTE
+                if(rl < sizeof(name) && r->style->palette != NULL) {
+                    memcpy(name, rv, rl);
+                    name[rl] = '\0';
+                    role = fypal_ctx_role(r->style->palette, name);
+                    if(role != NULL) {
+                        render_ansi(r, fypal_role_on(r->style->palette, role));
+                        r->ui_act_off =
+                            fypal_role_off(r->style->palette, role);
+                    }
+                }
+#endif
+            } else {
+                render_ansi(r, r->style->action.on);
+            }
             ui_marker(r, "act", v, vl, 0);
         }
     } else if(md_ui_tag_is(&t, "role")) {
