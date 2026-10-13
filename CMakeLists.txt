@@ -34,6 +34,17 @@ endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES GNU|Clang)
     add_compile_options(-Wall -Wextra -Wsign-compare)
+    # A returned address of stack storage is NULL in an optimized build.
+    # GCC detects it only when it optimizes.
+    include(CheckCCompilerFlag)
+    check_c_compiler_flag(-Werror=return-local-addr MD4C_HAVE_WERROR_LOCAL_ADDR)
+    if(MD4C_HAVE_WERROR_LOCAL_ADDR)
+        add_compile_options(-Werror=return-local-addr)
+    endif()
+    check_c_compiler_flag(-Werror=return-stack-address MD4C_HAVE_WERROR_STACK_ADDR)
+    if(MD4C_HAVE_WERROR_STACK_ADDR)
+        add_compile_options(-Werror=return-stack-address)
+    endif()
 
     # Build against the newest C standard the compiler supports, mirroring
     # libfyaml: gnu2x -> c2x -> gnu11.
