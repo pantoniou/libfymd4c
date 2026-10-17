@@ -1654,6 +1654,33 @@ wrap_text(const char* buf, MD_SIZE size, int width, int* n_out)
     return lines;
 }
 
+/* Isolate a cell slice from padding, borders and neighbouring cells while
+ * preserving inline styles that span a wrap boundary. */
+static void
+table_emit_content(MD_ANSI* r, const char* buf, TLINE ln, int pad,
+                   int is_header, int filled)
+{
+    SGR_STATE st;
+    char active[128];
+    size_t alen;
+
+    memset(&st, 0, sizeof(st));
+    if(ln.start > 0)
+        sgr_scan(&st, buf, ln.start);
+    alen = sgr_build(&st, active, sizeof(active));
+    if(is_header) render_ansi(r, r->style->table_header.on);
+    if(alen > 0) render_verbatim(r, active, (MD_SIZE)alen);
+    if(filled)
+        ui_emit_filled(r, buf + ln.start, ln.len, pad, 0);
+    else if(ln.len > 0)
+        render_verbatim(r, buf + ln.start, ln.len);
+    if(ln.len > 0)
+        sgr_scan(&st, buf + ln.start, ln.len);
+    if(sgr_build(&st, active, sizeof(active)) > 0)
+        RENDER_VERBATIM(r, "\x1b[0m");
+    if(is_header) render_ansi(r, r->style->table_header.off);
+}
+
 /* Emit one wrapped line of a cell, aligned and padded to `width`. */
 static void
 table_emit_slice(MD_ANSI* r, const char* buf, TLINE ln, int width,
@@ -1669,15 +1696,11 @@ table_emit_slice(MD_ANSI* r, const char* buf, TLINE ln, int width,
     if((r->flags & MD_ANSI_FLAG_UI) && ln.len > 0 &&
        ui_fill_count(buf + ln.start, ln.len) > 0) {
         /* a fill takes the padding of its cell */
-        if(is_header) render_ansi(r, r->style->table_header.on);
-        ui_emit_filled(r, buf + ln.start, ln.len, pad, 0);
-        if(is_header) render_ansi(r, r->style->table_header.off);
+        table_emit_content(r, buf, ln, pad, is_header, 1);
         return;
     }
     tbl_spaces(r, lpad);
-    if(is_header) render_ansi(r, r->style->table_header.on);
-    if(ln.len > 0) render_verbatim(r, buf + ln.start, ln.len);
-    if(is_header) render_ansi(r, r->style->table_header.off);
+    table_emit_content(r, buf, ln, pad, is_header, 0);
     tbl_spaces(r, rpad);
 }
 

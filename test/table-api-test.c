@@ -189,8 +189,39 @@ static void test_emoji_selector_cell(void)
     fymd_free(out);
 }
 
+/* Raw SGR makes this independent of the installed theme and palette. */
+static void test_wrapped_cell_style(void)
+{
+    static const char md[] =
+        "| a | b |\n|---|---|\n"
+        "| left | \x1b[41malpha beta gamma delta epsilon zeta eta theta\x1b[0m |\n";
+    struct fymd_renderer_cfg cfg;
+    struct fymd_renderer *r;
+    char *out;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.width = 30;
+    cfg.flags = FYMD_RF_NO_COLOR;
+    cfg.sgr_input = FYMD_SGR_KEEP;
+    r = fymd_renderer_create(&cfg);
+    CHECK(r, "a renderer is made");
+    if (!r) return;
+    out = fymd_render_to_string(r, md, sizeof(md) - 1);
+    fymd_renderer_destroy(r);
+    CHECK(out, "the styled table renders");
+    if (!out) return;
+    CHECK(strstr(out, "\x1b[41malpha beta gamma\x1b[0m  \n"),
+          "background closes before padding and newline");
+    CHECK(strstr(out, "\x1b[41mdelta epsilon\x1b[0m     \n"),
+          "continuation restores and closes its background");
+    CHECK(strstr(out, "\x1b[41mzeta eta theta\x1b[0m"),
+          "style survives multiple wrap boundaries");
+    fymd_free(out);
+}
+
 int main(void)
 {
+    test_wrapped_cell_style();
     test_emoji_selector_cell();
     test_fit_places_the_table();
     test_place_needs_fit();
