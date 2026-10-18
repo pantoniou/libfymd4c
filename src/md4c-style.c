@@ -27,6 +27,8 @@ struct md4c_embedded_theme {
 };
 
 #include "md4c_default_style.inc"   /* MD4C_DEFAULT_STYLE[], MD4C_DEFAULT_STYLE_LEN */
+#include "md4c_style_images.inc"    /* MD4C_IMG_*[], images of the styles */
+#include "md4c_style_image_table.inc" /* MD4C_IMAGES[]: default, then MD4C_THEMES[] */
 
 /* ---- owned-string registry: every resolved string is strdup'd here so the
  *      parsed fy_generic builder can be torn down immediately ---- */
@@ -293,6 +295,53 @@ style_alloc(void)
     return s;
 }
 
+/*
+ * The slot of an embedded style in MD4C_IMAGES[]: 0 is the default style,
+ * 1 + i is MD4C_THEMES[i]. -1 if DATA is not an embedded style.
+ */
+static int
+embedded_slot(const char* data)
+{
+    size_t i;
+
+    if(data == (const char*) MD4C_DEFAULT_STYLE)
+        return 0;
+    for(i = 0; i < MD4C_THEME_COUNT; i++) {
+        if(data == (const char*) MD4C_THEMES[i].yaml)
+            return (int) (1 + i);
+    }
+    return -1;
+}
+
+/*
+ * Build S from the image of an embedded style. Loading relocates the image in
+ * place, so it loads a copy that lives only until the style has copied its
+ * strings; the image in the library is never written. Returns 0 on success,
+ * -1 if there is no usable image (the caller parses the text).
+ */
+static int
+build_style_from_image(MD_ANSI_STYLE* s, int slot, const MD_ANSI_STYLE_OPTS* opts)
+{
+    size_t len = MD4C_IMAGES[slot].len;
+    unsigned char* copy;
+    fy_generic root = fy_invalid;
+    int rc = -1;
+
+    if(len == 0 || getenv("FYMD_NO_IMAGE") != NULL)
+        return -1;
+    copy = (unsigned char*) aligned_alloc(FY_GENERIC_IMAGE_ALIGN,
+            (len + FY_GENERIC_IMAGE_ALIGN - 1) & ~((size_t) FY_GENERIC_IMAGE_ALIGN - 1));
+    if(copy == NULL)
+        return -1;
+    memcpy(copy, MD4C_IMAGES[slot].data, len);
+    if(fy_generic_image_load(copy, len, &root) == 0 && fy_generic_is_valid(root)) {
+        build_style(s, (STRREG*) s->_owned, root, opts);
+        rc = 0;
+    }
+    free(copy);
+    return rc;
+}
+
 MD_ANSI_STYLE*
 md_ansi_style_create(const char* yaml, size_t yaml_len, const MD_ANSI_STYLE_OPTS* opts)
 {
@@ -300,6 +349,7 @@ md_ansi_style_create(const char* yaml, size_t yaml_len, const MD_ANSI_STYLE_OPTS
     struct fy_generic_builder* gb;
     fy_generic root;
     fy_generic_sized_string src;
+    int slot;
 
     s = style_alloc();
     if(s == NULL)
@@ -312,6 +362,12 @@ md_ansi_style_create(const char* yaml, size_t yaml_len, const MD_ANSI_STYLE_OPTS
         src.data = yaml;
         src.size = yaml_len;
     }
+
+    slot = embedded_slot(src.data);
+    if(slot >= 0 && src.size == (slot ? MD4C_THEMES[slot - 1].yaml_len :
+                                        MD4C_DEFAULT_STYLE_LEN) &&
+       build_style_from_image(s, slot, opts) == 0)
+        return s;
 
     gb = fy_generic_builder_create(NULL);
     if(gb == NULL) { md_ansi_style_destroy(s); return NULL; }

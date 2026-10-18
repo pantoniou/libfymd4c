@@ -60,6 +60,48 @@ file(APPEND "${_md4c_style_inc}"
     "static const struct md4c_embedded_theme MD4C_THEMES[] = {\n${_md4c_theme_catalog}};\n"
     "static const size_t MD4C_THEME_COUNT = sizeof(MD4C_THEMES) / sizeof(MD4C_THEMES[0]);\n")
 
+# Prebuilt images of the embedded styles (md4c-style.c). fymd-mkimage runs on
+# the build host, so a cross build embeds empty images and the library parses
+# the text.
+set(_md4c_image_syms "MD4C_IMG_DEFAULT")
+set(_md4c_image_args "MD4C_IMG_DEFAULT=${_md4c_style_yaml}")
+set(_md4c_image_table "    {MD4C_IMG_DEFAULT, MD4C_IMG_DEFAULT_LEN},\n")
+foreach(_theme_yaml IN LISTS _md4c_theme_yamls)
+    get_filename_component(_theme "${_theme_yaml}" NAME_WE)
+    string(TOUPPER "${_theme}" _theme_upper)
+    list(APPEND _md4c_image_syms "MD4C_IMG_${_theme_upper}")
+    list(APPEND _md4c_image_args "MD4C_IMG_${_theme_upper}=${_theme_yaml}")
+    string(APPEND _md4c_image_table
+        "    {MD4C_IMG_${_theme_upper}, MD4C_IMG_${_theme_upper}_LEN},\n")
+endforeach()
+set(_md4c_images_inc "${CMAKE_CURRENT_BINARY_DIR}/generated/md4c_style_images.inc")
+set(_md4c_images_ok FALSE)
+if(NOT CMAKE_CROSSCOMPILING AND TARGET libfyaml::libfyaml)
+    set(_md4c_images_ok TRUE)
+endif()
+if(_md4c_images_ok)
+    add_executable(fymd_mkimage ../tools/fymd-mkimage.c)
+    target_compile_definitions(fymd_mkimage PRIVATE _GNU_SOURCE)
+    target_link_libraries(fymd_mkimage PRIVATE libfyaml::libfyaml)
+    file(GLOB _md4c_all_yamls CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/../stylings/themes/*.yaml")
+    add_custom_command(
+        OUTPUT "${_md4c_images_inc}"
+        COMMAND fymd_mkimage "${_md4c_images_inc}" ${_md4c_image_args}
+        DEPENDS fymd_mkimage "${_md4c_style_yaml}" ${_md4c_all_yamls}
+        COMMENT "Building the images of the embedded styles" VERBATIM)
+    set_property(SOURCE md4c-style.c APPEND PROPERTY OBJECT_DEPENDS "${_md4c_images_inc}")
+else()
+    set(_md4c_stub "/* Images are not built. */\n")
+    foreach(_sym IN LISTS _md4c_image_syms)
+        string(APPEND _md4c_stub
+            "static unsigned char ${_sym}[1] = { 0 };\nstatic const size_t ${_sym}_LEN = 0;\n")
+    endforeach()
+    file(WRITE "${_md4c_images_inc}" "${_md4c_stub}")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/md4c_style_image_table.inc"
+    "static struct { unsigned char* data; size_t len; } MD4C_IMAGES[] __attribute__((unused)) = {\n${_md4c_image_table}};\n")
+
 # The shipped library: libfymd4c. Everything (md4c parser + entity table, HTML
 # renderer, heal utility, ANSI renderer, styling and streaming front-end) is
 # compiled in and hidden; the only exported symbols are the fymd_* public API.
