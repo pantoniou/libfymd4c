@@ -4,6 +4,10 @@
 
 ## Fork additions (ANSI renderer / libfymd4c)
 
+  * md4c-style: a build that is not a cross build loads a prebuilt
+    image of an embedded style instead of parsing its text (`fymd-mkimage`).
+    `FYMD_NO_IMAGE` in the environment selects the parse.
+
   * ANSI renderer: a table fitted to its content can stand in the middle or at
     the right of the width. `FYMD_RF_TABLE_CENTER` and `FYMD_RF_TABLE_RIGHT`
     place it with `FYMD_RF_TABLE_FIT`. The CLI takes `--table-size=fit-center`

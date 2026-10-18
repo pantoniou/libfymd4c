@@ -619,6 +619,13 @@ default (`stylings/md4c-default.yaml`, embedded at build time) reproduces the
 historical hardcoded look; `--style=FILE` (CLI) or `md_ansi_style_*` (library)
 overrides any subset.
 
+When the build is not a cross build, `fymd-mkimage` parses the embedded styles (the default
+and the themes) at build time. A renderer loads a copy of the relocatable image
+of its style, without parsing the text, and drops the copy when the style has
+its strings; the library keeps no state between renderers. Otherwise the text is
+parsed. Both give the same style; `FYMD_NO_IMAGE` in the environment selects the
+parse.
+
 Focused partial themes for ASCII, heavy Unicode, colored-header, and visually
 borderless tables are available under `stylings/examples/`.
 
