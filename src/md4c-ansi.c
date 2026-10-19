@@ -1373,6 +1373,19 @@ sgr_build(const SGR_STATE* s, char* out, size_t cap)
     return (size_t) snprintf(out, cap, "\x1b[%sm", params);
 }
 
+/* True when the `n` bytes of a CSI parameter field hold only digits, ';' and
+ * ':', the parameters of a well-formed SGR sequence. */
+static int
+sgr_params_plain(const char* p, MD_SIZE n)
+{
+    MD_SIZE k;
+    for(k = 0; k < n; k++) {
+        if(!((p[k] >= '0' && p[k] <= '9') || p[k] == ';' || p[k] == ':'))
+            return 0;
+    }
+    return 1;
+}
+
 /* Filter ANSI escape sequences out of a run of input text into `out` (which
  * must have room for at least `size` bytes), per the renderer's SGR policy:
  *   strip (neither flag) : drop every escape sequence.
@@ -1387,9 +1400,11 @@ sgr_filter_input(unsigned flags, const char* in, MD_SIZE size, char* out)
     while(i < size) {
         MD_SIZE e = ansi_esc_len(in + i, size - i);
         if(e == 0) { out[o++] = in[i++]; continue; }
-        /* SAFE keeps SGR (CSI sequences ending in 'm'); everything else drops. */
+        /* SAFE keeps SGR (CSI, digits, ';' and ':', then 'm'); everything else
+         * drops. A private or intermediate-byte sequence that ends in 'm',
+         * such as CSI ? 4 m, is not SGR. */
         if(safe && e >= 3 && (unsigned char) in[i] == 0x1b && in[i + 1] == '['
-           && in[i + e - 1] == 'm') {
+           && in[i + e - 1] == 'm' && sgr_params_plain(in + i + 2, e - 3)) {
             memcpy(out + o, in + i, e);
             o += e;
         }
