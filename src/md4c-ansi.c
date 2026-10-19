@@ -375,8 +375,8 @@ sgr_is_reset(const char* params, MD_SIZE n)
 }
 
 /* Emit one completed output line (r->card_buf, no trailing newline) as a card:
- * the theme background, the content with the background re-applied after every
- * full reset, then erase-to-end-of-line (which fills the background to the edge)
+ * the theme background, the content with the background restored after resets,
+ * then erase-to-end-of-line (which fills the background to the edge)
  * and a reset. Called only when card mode is active and not mid-capture. */
 static void
 flush_card_line(MD_ANSI* r)
@@ -386,16 +386,22 @@ flush_card_line(MD_ANSI* r)
     const char* off = r->style->reverse.off;    /* reset (from YAML) */
     MD_SIZE bglen = (MD_SIZE) strlen(bg);
     MD_SIZE n = r->card_size, i = 0;
+    SGR_STATE state;
 
     r->real_output(bg, bglen, r->userdata);
     while(i < n) {
         MD_SIZE e = ansi_esc_len(b + i, n - i);
         if(e > 0) {
             r->real_output(b + i, e, r->userdata);
-            /* A full reset in the content clears the card background; put it back. */
             if(e >= 3 && (unsigned char) b[i] == 0x1b && b[i + 1] == '['
-               && b[i + e - 1] == 'm' && sgr_is_reset(b + i + 2, e - 3))
-                r->real_output(bg, bglen, r->userdata);
+               && b[i + e - 1] == 'm') {
+                /* Restore the card only when this SGR clears the background. */
+                memset(&state, 0, sizeof(state));
+                state.bg[0] = 'x';
+                sgr_scan(&state, b + i, e);
+                if(state.bg[0] == '\0')
+                    r->real_output(bg, bglen, r->userdata);
+            }
             i += e;
         } else {
             MD_SIZE j = i;
