@@ -96,6 +96,14 @@ main(void)
                                 &safe, &safe_len) != 0 ||
        safe_len != 3 || memcmp(safe, "ok\n", 3) != 0)
         failed = 1;
+    fymd_free(safe);
+
+    /* A carriage return is resolved as a terminal shows it. */
+    if(fymd_render_fenced_block(r, "a\r\r\rb\nc\r\nd\r\n",
+                                sizeof("a\r\r\rb\nc\r\nd\r\n") - 1, &opts,
+                                &safe, &safe_len) != 0 ||
+       safe_len != 6 || memcmp(safe, "b\nc\nd\n", 6) != 0)
+        failed = 1;
 
     /* Arbitrary {key} values are borrowed from the caller's generic map. */
     gb = fy_generic_builder_create(NULL);
