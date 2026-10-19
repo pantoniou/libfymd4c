@@ -1413,6 +1413,33 @@ sgr_filter_input(unsigned flags, const char* in, MD_SIZE size, char* out)
     return o;
 }
 
+/* Resolve carriage returns of a code run as a terminal shows them: CRLF is a
+ * line end, and a bare CR makes the text after it replace the row so far. A raw
+ * CR in a rendered row would move the cursor of the host. `out` may be `in`;
+ * the write never passes the read. Returns the number of bytes written. */
+static MD_SIZE
+code_resolve_cr(const char* in, MD_SIZE size, char* out)
+{
+    MD_SIZE i = 0, o = 0, eol, seg, k;
+    while(i < size) {
+        for(eol = i; eol < size && in[eol] != '\n'; )
+            eol++;
+        if(eol < size)
+            eol++;
+        seg = i;
+        for(k = i; k + 1 < eol; k++) {
+            if(in[k] == '\r' && in[k + 1] != '\n')
+                seg = k + 1;
+        }
+        for(k = seg; k < eol; k++) {
+            if(in[k] != '\r')
+                out[o++] = in[k];
+        }
+        i = eol;
+    }
+    return o;
+}
+
 /* Display width of a buffer, ignoring ANSI escape sequences. */
 static int
 ansi_disp_width(const char* buf, MD_SIZE size)
@@ -5238,13 +5265,21 @@ md_ansi_fenced_styled(const MD_CHAR* input, MD_SIZE input_size,
 
     /* Apply the same embedded-escape policy as Markdown code text. */
     if(!(render.flags & MD_ANSI_FLAG_SGR_KEEP) && input_size > 0 &&
-       memchr(input, 0x1b, input_size) != NULL) {
+       (memchr(input, 0x1b, input_size) != NULL ||
+        memchr(input, '\r', input_size) != NULL)) {
         filtered = (char*) malloc(input_size);
         if(filtered == NULL) {
             ret = -1;
             goto out;
         }
-        code_size = sgr_filter_input(render.flags, input, input_size, filtered);
+        if(memchr(input, 0x1b, input_size) != NULL) {
+            code_size = sgr_filter_input(render.flags, input, input_size,
+                                         filtered);
+        } else {
+            memcpy(filtered, input, input_size);
+            code_size = input_size;
+        }
+        code_size = code_resolve_cr(filtered, code_size, filtered);
         code = filtered;
     }
     if(code_size > 0) {
