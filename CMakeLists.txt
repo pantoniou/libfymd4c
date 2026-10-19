@@ -252,6 +252,10 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(table-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME table-api COMMAND table-api-test)
 
+        add_executable(sgr-safe-api-test test/sgr-safe-api-test.c)
+        target_link_libraries(sgr-safe-api-test PRIVATE libfymd4c::libfymd4c)
+        add_test(NAME sgr-safe-api COMMAND sgr-safe-api-test)
+
         add_test(
             NAME table-size-cli
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/test"
