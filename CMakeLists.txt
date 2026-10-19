@@ -271,6 +271,10 @@ if (BUILD_FYMD4C_EXECUTABLE)
 
         add_executable(ui-api-test test/ui-api-test.c)
         target_link_libraries(ui-api-test PRIVATE libfymd4c::libfymd4c)
+        add_executable(card-api-test test/card-api-test.c)
+        target_link_libraries(card-api-test PRIVATE libfymd4c::libfymd4c)
+        add_test(NAME regression/card-background-after-code COMMAND card-api-test)
+
         if(MD4C_WITH_FYPALETTE)
             target_link_libraries(ui-api-test PRIVATE libfypalette::libfypalette)
             target_compile_definitions(ui-api-test PRIVATE FYMD_TEST_PALETTE)
