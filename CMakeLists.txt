@@ -232,6 +232,10 @@ if (BUILD_FYMD4C_EXECUTABLE)
         target_link_libraries(line-limit-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME line-limit-api COMMAND line-limit-api-test)
 
+        add_executable(quote-freeze-api-test test/quote-freeze-api-test.c)
+        target_link_libraries(quote-freeze-api-test PRIVATE libfymd4c::libfymd4c)
+        add_test(NAME quote-freeze-api COMMAND quote-freeze-api-test)
+
         add_executable(measure-rows-api-test test/measure-rows-api-test.c)
         target_link_libraries(measure-rows-api-test PRIVATE libfymd4c::libfymd4c)
         add_test(NAME measure-rows-api COMMAND measure-rows-api-test)

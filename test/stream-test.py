@@ -21,6 +21,13 @@ FIXTURES = {
     "setext": "A setext heading\n================\n\nFollowed by a normal paragraph of text.\n",
     "list": "- one item\n- two item with a good amount of text that may wrap around\n- three\n\nafter the list\n",
     "blockquote": "> a quoted line that is long enough to wrap onto another line within the quote\n>\n> second quoted paragraph\n\nout.\n",
+    # A quoted run whose paragraphs are separated by `> ` rows only: the
+    # stream splits it at those rows, and the result must not change.
+    "quote_paras": "> **One**\n> \n> first paragraph of the quote with enough words to wrap on a narrow width\n> \n> **Two**\n> \n> second paragraph\n\nafter.\n",
+    "quote_paras_bare": "> alpha\n>\n> beta\n>\n> gamma\n",
+    "quote_fence": "> ```c\n> int a;\n> \n> int b;\n> ```\n> \n> text\n\nend.\n",
+    "quote_list": "> - a\n> \n> - b\n> \n> tail\n",
+    "quote_nested": ">> inner\n>> \n>> more\n> \n> outer\n",
     "table": "| Name | Role | Notes |\n|:-----|:----:|------:|\n| Alice | Admin | active |\n| Bob | User | a longer cell value |\n\ndone.\n",
     "table_in_quote": "> | A | B |\n> |---|---|\n> | 1 | 2 |\n\nafter.\n",
     "code": "```js\nconst x = 1;\n\nconst y = 2;\n```\n\nafter code.\n",

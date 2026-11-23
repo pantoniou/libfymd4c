@@ -113,6 +113,9 @@ struct MD4C_STREAM {
     STREAM_BUF seg;       /* render of a candidate committed segment */
     STREAM_BUF out;       /* slice returned to the caller (committed/preview/finish) */
     STREAM_BUF shown;     /* active region currently displayed (for md4c_stream_render) */
+    STREAM_BUF sep;       /* separator before the region at `anchor`; empty => "\n" */
+    STREAM_BUF next_sep;  /* separator for the region after a pending commit */
+    STREAM_BUF probe[3];  /* scratch renders that derive a quote separator */
     size_t anchor;        /* input offset of the last confirmed sync point */
     int emitted;          /* non-zero once any committed output has been returned */
     int finished;
@@ -542,12 +545,49 @@ html_block_ends(const char* line, size_t llen, int type)
     return 0;
 }
 
+/* Strip the quote markers of @line: one or more `>` each followed by one
+ * optional space. Returns the number of bytes stripped, 0 if the line is not
+ * quoted at column 0. */
+static size_t
+quote_prefix(const char* line, size_t llen)
+{
+    size_t k = 0;
+
+    if(llen == 0 || line[0] != '>')
+        return 0;
+    while(k < llen && line[k] == '>') {
+        k++;
+        if(k < llen && line[k] == ' ')
+            k++;
+    }
+    return k;
+}
+
+/* True if @s (@n bytes) is blank after its quote markers. */
+static int
+quote_rest_blank(const char* s, size_t n)
+{
+    size_t i;
+
+    for(i = 0; i < n; i++)
+        if(s[i] != ' ' && s[i] != '\t' && s[i] != '\r')
+            return 0;
+    return 1;
+}
+
 /* Furthest "safe sync point" offset greater than `from`: the offset just after
  * a blank line that (a) is not inside a fenced code block, and (b) is followed
  * by a complete next line that starts at column 0, is non-blank and is not a
  * list item. At such a point all block containers are closed, so the renderer
  * is in its initial state and the suffix renders standalone identically to the
  * tail of a full render.
+ *
+ * A blockquote paragraph break is a sync point too: a line of only quote
+ * markers (`> `) followed by a quoted line that starts at its column 0 and is
+ * not a list item or indented. A quote with no other blank line (the reasoning
+ * of a model) would otherwise stay one active region until it ends. The caller
+ * render-verifies the committed segment, so a split that changes the rows is
+ * not acted on.
  *
  * Additionally, inside a fenced code block whose language renders forward-only
  * (see lang_progressive_unsafe), every completed interior line is
@@ -566,6 +606,9 @@ next_sync_offset(const MD_ANSI_STYLE* style, const char* data, size_t size,
     int fence_markup = 0;
     int in_html = 0, html_type = 0;
     int ui_depth = 0;           /* open fy-columns blocks */
+    int in_qfence = 0;          /* inside a fence of a blockquote */
+    char qfence_ch = 0;
+    size_t qfence_len = 0;
 
     while(i <= size) {
         if(i == size || data[i] == '\n') {
@@ -600,6 +643,37 @@ next_sync_offset(const MD_ANSI_STYLE* style, const char* data, size_t size,
                 while(j + ls < llen && line[j + ls] != ' ' && line[j + ls] != '\t')
                     ls++;
                 fence_markup = lang_progressive_unsafe(style, line + j, ls);
+            } else if(quote_prefix(line, llen) != 0) {
+                size_t q = quote_prefix(line, llen);
+                const char* rest = line + q;
+                size_t rlen = llen - q, rk = 0;
+                char qc;
+                size_t qrun;
+
+                while(rk < rlen && (rest[rk] == ' ' || rest[rk] == '\t')) rk++;
+                if(in_qfence) {
+                    if(fence_close_line(rest, rlen, rk, qfence_ch, qfence_len))
+                        in_qfence = 0;
+                } else if((qrun = fence_open_run(rest, rlen, rk, &qc)) != 0) {
+                    in_qfence = 1;
+                    qfence_ch = qc;
+                    qfence_len = qrun;
+                } else if(i < size && quote_rest_blank(rest, rlen)) {
+                    size_t nxt = i + 1;
+                    const char* nl = nxt < size ?
+                        (const char*) memchr(data + nxt, '\n', size - nxt) : NULL;
+
+                    if(nl != NULL && ui_depth == 0) {
+                        size_t nq = quote_prefix(data + nxt, (size_t)(nl - (data + nxt)));
+                        const char* nrest = data + nxt + nq;
+                        size_t nrlen = (size_t)(nl - (data + nxt)) - nq;
+
+                        if(nq != 0 && nrlen != 0 && nrest[0] != ' ' && nrest[0] != '\t' &&
+                           !quote_rest_blank(nrest, nrlen) &&
+                           !line_is_list_item(nrest, nrlen))
+                            best = nxt;
+                    }
+                }
             } else {
                 int t = html_block_start_type(line + k, llen - k);
                 /* Columns lay out their blocks side by side, so a column
@@ -730,6 +804,11 @@ md4c_stream_destroy(MD4C_STREAM* s)
     sbuf_fini(&s->seg);
     sbuf_fini(&s->out);
     sbuf_fini(&s->shown);
+    sbuf_fini(&s->sep);
+    sbuf_fini(&s->next_sep);
+    sbuf_fini(&s->probe[0]);
+    sbuf_fini(&s->probe[1]);
+    sbuf_fini(&s->probe[2]);
     free(s);
 }
 
@@ -740,6 +819,37 @@ static int
 stream_needs_sep(MD4C_STREAM* s)
 {
     return s->emitted && !s->in_code_body;
+}
+
+/* The separator bytes between committed output and the region at `anchor`:
+ * the plain "\n" row, or the quote row captured at a blockquote sync point. */
+static const char*
+stream_sep(const MD4C_STREAM* s, size_t* n)
+{
+    if(s->sep.size > 0) {
+        *n = s->sep.size;
+        return s->sep.data;
+    }
+    *n = 1;
+    return "\n";
+}
+
+static size_t
+stream_sep_len(const MD4C_STREAM* s)
+{
+    size_t n;
+
+    (void) stream_sep(s, &n);
+    return n;
+}
+
+static int
+stream_append_sep(MD4C_STREAM* s, STREAM_BUF* b)
+{
+    size_t n;
+    const char* p = stream_sep(s, &n);
+
+    return sbuf_append(b, p, n);
 }
 
 /* Re-establish the code-fence continuation state from the current anchor: set
@@ -771,7 +881,7 @@ stream_emit(MD4C_STREAM* s, const char* data, size_t size)
     sbuf_reset(&s->out);
     if(size == 0)
         return 0;
-    if(stream_needs_sep(s) && sbuf_append(&s->out, "\n", 1) != 0)
+    if(stream_needs_sep(s) && stream_append_sep(s, &s->out) != 0)
         return -1;
     if(sbuf_append(&s->out, data, size) != 0)
         return -1;
@@ -786,11 +896,73 @@ stream_emit_append(MD4C_STREAM* s, const char* data, size_t size)
 {
     if(size == 0)
         return 0;
-    if(stream_needs_sep(s) && sbuf_append(&s->out, "\n", 1) != 0)
+    if(stream_needs_sep(s) && stream_append_sep(s, &s->out) != 0)
         return -1;
     if(sbuf_append(&s->out, data, size) != 0)
         return -1;
     s->emitted = 1;
+    return 0;
+}
+
+/* Whether the line that ends just before @sync is a blockquote paragraph
+ * break (only quote markers). */
+static int
+sync_after_quote_break(const MD4C_STREAM* s, size_t sync)
+{
+    size_t end = sync, start;
+    const char* d = s->accum.data;
+
+    if(end == 0 || d[end - 1] != '\n')
+        return 0;
+    end--;
+    start = end;
+    while(start > 0 && d[start - 1] != '\n') start--;
+    return quote_prefix(d + start, end - start) != 0 &&
+           quote_rest_blank(d + start + quote_prefix(d + start, end - start),
+                            end - start - quote_prefix(d + start, end - start));
+}
+
+/* Prepare s->next_sep for a commit at @sync. A plain sync leaves it empty. A
+ * blockquote break needs the row that the one-shot render draws between the
+ * two paragraphs, gutter included: it is what the full render holds between
+ * the committed segment and the render of the rest. Returns 1 when the commit
+ * may go ahead, 0 when that row cannot be derived byte for byte. */
+static int
+stream_next_sep(MD4C_STREAM* s, size_t sync)
+{
+    STREAM_BUF *seg = &s->probe[0], *full = &s->probe[1], *rest = &s->probe[2];
+    size_t mid;
+
+    sbuf_reset(&s->next_sep);
+    if(!sync_after_quote_break(s, sync))
+        return 1;
+    if(s->in_code_body)
+        return 0;
+    if(stream_render(s, seg, s->accum.data + s->anchor, sync - s->anchor,
+                     0, 1) != 0 ||
+       stream_render(s, full, s->accum.data + s->anchor,
+                     s->accum.size - s->anchor, 0, 1) != 0 ||
+       stream_render(s, rest, s->accum.data + sync, s->accum.size - sync,
+                     0, 1) != 0)
+        return 0;
+    if(seg->size + rest->size >= full->size ||
+       memcmp(full->data, seg->data, seg->size) != 0 ||
+       memcmp(full->data + full->size - rest->size, rest->data,
+              rest->size) != 0)
+        return 0;
+    mid = full->size - rest->size - seg->size;
+    return sbuf_append(&s->next_sep, full->data + seg->size, mid) == 0;
+}
+
+/* The separator of the region at the new anchor. */
+static int
+stream_take_sep(MD4C_STREAM* s)
+{
+    sbuf_reset(&s->sep);
+    if(s->next_sep.size && sbuf_append(&s->sep, s->next_sep.data,
+                                       s->next_sep.size) != 0)
+        return -1;
+    sbuf_reset(&s->next_sep);
     return 0;
 }
 
@@ -824,6 +996,7 @@ md4c_stream_push(MD4C_STREAM* s, const char* chunk, size_t len,
             if(stream_emit_append(s, s->seg.data, s->seg.size) != 0)
                 return -1;
             s->anchor = cut;
+            sbuf_reset(&s->sep);
             stream_sync_fence(s);
         }
     }
@@ -844,10 +1017,13 @@ md4c_stream_push(MD4C_STREAM* s, const char* chunk, size_t len,
             return -1;
         if(s->seg.size <= s->tail.size
            && (s->seg.size == 0
-               || memcmp(s->seg.data, s->tail.data, s->seg.size) == 0)) {
+               || memcmp(s->seg.data, s->tail.data, s->seg.size) == 0)
+           && stream_next_sep(s, sync)) {
             if(stream_emit_append(s, s->seg.data, s->seg.size) != 0)
                 return -1;
             s->anchor = sync;
+            if(stream_take_sep(s) != 0)
+                return -1;
             stream_sync_fence(s);
         }
     }
@@ -989,7 +1165,7 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
                      s->accum.size - s->anchor, s->heal, 1) != 0)
         return -1;
     sbuf_reset(&s->tail);
-    if(stream_needs_sep(s) && sbuf_append(&s->tail, "\n", 1) != 0)
+    if(stream_needs_sep(s) && stream_append_sep(s, &s->tail) != 0)
         return -1;
     if(sbuf_append(&s->tail, s->seg.data, s->seg.size) != 0)
         return -1;
@@ -1023,13 +1199,14 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
      * and drop out of the mutable active region. */
     sync = next_sync_offset(s->style, s->accum.data, s->accum.size, s->anchor);
     if(sync > s->anchor) {
-        size_t sep = stream_needs_sep(s) ? 1 : 0;
+        size_t sep = stream_needs_sep(s) ? stream_sep_len(s) : 0;
         if(stream_render(s, &s->out, s->accum.data + s->anchor,
                          sync - s->anchor, 0, 1) != 0)
             return -1;
         if(s->out.size <= s->seg.size
            && (s->out.size == 0
-               || memcmp(s->out.data, s->seg.data, s->out.size) == 0)) {
+               || memcmp(s->out.data, s->seg.data, s->out.size) == 0)
+           && stream_next_sep(s, sync)) {
             /* A segment that renders to nothing (e.g. a stripped HTML block)
              * freezes nothing -- in particular not the separator row, which
              * still belongs to the next visible block -- and does not mark
@@ -1040,6 +1217,8 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
                 s->emitted = 1;
             }
             s->anchor = sync;
+            if(stream_take_sep(s) != 0)
+                return -1;
             stream_sync_fence(s);
         }
     }
@@ -1055,7 +1234,7 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
         size_t cut = forced_cut_offset(s->accum.data, s->accum.size,
                                        s->anchor, s->max_active_lines, s->width);
         if(cut > s->anchor) {
-            size_t sep = stream_needs_sep(s) ? 1 : 0;
+            size_t sep = stream_needs_sep(s) ? stream_sep_len(s) : 0;
             size_t dropped_lines, body;
             if(stream_render(s, &s->out, s->accum.data + s->anchor,
                              cut - s->anchor, 0, 1) != 0)
@@ -1068,6 +1247,7 @@ md4c_stream_render(MD4C_STREAM* s, const char* chunk, size_t len,
                 s->emitted = 1;
             }
             s->anchor = cut;
+            sbuf_reset(&s->sep);
             stream_sync_fence(s);
         }
     }
